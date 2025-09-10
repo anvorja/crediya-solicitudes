@@ -16,7 +16,6 @@ import java.time.LocalDateTime;
  * Use Case para crear solicitudes de préstamo (HU2)
  * Implementa validaciones de negocio y flujo reactivo completo
  * CUMPLE: Campos final para concurrencia segura (Rule_2.5)
- * SIMPLIFICADO: Solo lo necesario para HU2
  */
 @RequiredArgsConstructor
 public class CrearSolicitudUseCase {
@@ -112,7 +111,6 @@ public class CrearSolicitudUseCase {
     /**
      * Valida si el tipo de préstamo es uno de los permitidos
      * CUMPLE: Reglas de negocio específicas del dominio
-     * ACTUALIZADO: Incluye los 4 tipos según tu ValidationMessagesConstants
      */
     private boolean esTipoPrestamoValido(String tipoCredito) {
         if (tipoCredito == null || tipoCredito.trim().isEmpty()) {

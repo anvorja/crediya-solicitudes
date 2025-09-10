@@ -2,10 +2,6 @@
 package com.crediya.solicitudes.api.dto.response;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
-//import lombok.AllArgsConstructor;
-//import lombok.Data;
-//import lombok.NoArgsConstructor;
-
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
@@ -13,9 +9,6 @@ import java.time.LocalDateTime;
  * DTO de respuesta para solicitudes de préstamo
  * Información que se retorna al cliente después de crear/consultar una solicitud
  */
-//@Data
-//@NoArgsConstructor
-//@AllArgsConstructor
 public record SolicitudResponse(
     String id,
      String numeroDocumento,
@@ -36,7 +29,6 @@ public record SolicitudResponse(
 
      String observaciones,
 
-    // Información financiera (solo para responses internas/admin)
      BigDecimal ingresosMensuales,
      BigDecimal gastosMensuales
 )

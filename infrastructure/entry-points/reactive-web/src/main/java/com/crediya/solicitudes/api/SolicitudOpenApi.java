@@ -12,8 +12,6 @@ import static org.springdoc.core.fn.builders.requestbody.Builder.requestBodyBuil
 import static org.springdoc.core.fn.builders.schema.Builder.schemaBuilder;
 
 /**
- * Documentación OpenAPI para endpoints de Solicitudes
- * Separación de responsabilidades: documentación separada de lógica de negocio
  * HU2: Registrar una solicitud de préstamo
  */
 @UtilityClass

@@ -4,20 +4,9 @@ package com.crediya.solicitudes.api.dto.request;
 import com.crediya.solicitudes.model.constants.BusinessConstants;
 import com.crediya.solicitudes.api.constants.ValidationMessagesConstants;
 import jakarta.validation.constraints.*;
-//import lombok.AllArgsConstructor;
-//import lombok.Data;
-//import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
 
-/**
- * DTO para la creación de solicitudes de préstamo
- * Validaciones de entrada según requisitos de negocio
- */
-//@Data
-//@NoArgsConstructor
-//@AllArgsConstructor
-//public class CrearSolicitudRequest {
 public record CrearSolicitudRequest(
 
         @NotBlank(message = ValidationMessagesConstants.Validation.DOCUMENTO_REQUERIDO)
