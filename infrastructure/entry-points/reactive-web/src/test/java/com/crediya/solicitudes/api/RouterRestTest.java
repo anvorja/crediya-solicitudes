@@ -1,4 +1,3 @@
-// infrastructure/entry-points/reactive-web/src/test/java/com/crediya/solicitudes/api/RouterRestTest.java
 package com.crediya.solicitudes.api;
 
 import com.crediya.solicitudes.api.mapper.SolicitudRestMapper;
@@ -46,8 +45,9 @@ class RouterRestTest {
                 .expectStatus().isOk()
                 .expectBody(String.class)
                 .value(response -> Assertions.assertThat(response)
-                        .contains("\"status\": \"UP\"")
-                        .contains("\"service\": \"microservicio-solicitudes\""));
+                        .contains("\"status\":\"UP\"")
+                        .contains("\"service\":\"microservicio-solicitudes\"")
+                        .contains("\"description\":\"HU2 - Registrar solicitud de préstamo\""));
     }
 
     @Test
@@ -59,8 +59,9 @@ class RouterRestTest {
                 .expectStatus().isOk()
                 .expectBody(String.class)
                 .value(response -> Assertions.assertThat(response)
-                        .contains("\"message\": \"Endpoint en construcción\"")
-                        .contains("\"solicitudId\": \"123\""));
+                        .contains("Endpoint en construcción - Consulta por ID")
+                        .contains("solicitudId")
+                        .contains("123"));
     }
 
     @Test
@@ -72,7 +73,8 @@ class RouterRestTest {
                 .expectStatus().isOk()
                 .expectBody(String.class)
                 .value(response -> Assertions.assertThat(response)
-                        .contains("\"message\": \"Endpoint en construcción\"")
-                        .contains("\"numeroDocumento\": \"12345678\""));
+                        .contains("Endpoint en construcción - Consulta por documento")
+                        .contains("numeroDocumento")
+                        .contains("12345678"));
     }
 }

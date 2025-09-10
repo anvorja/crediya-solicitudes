@@ -1,3 +1,4 @@
+// infrastructure/entry-points/reactive-web/src/main/java/com/crediya/solicitudes/api/constants/ValidationMessagesConstants.java
 package com.crediya.solicitudes.api.constants;
 
 public class ValidationMessagesConstants {

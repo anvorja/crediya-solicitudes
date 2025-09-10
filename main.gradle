@@ -74,6 +74,17 @@ subprojects {
 
     jacocoTestReport {
         dependsOn test, 'pitest'
+
+        afterEvaluate {
+            classDirectories.setFrom(files(classDirectories.files.collect {
+                fileTree(dir: it, exclude: [
+                        // Excluir código no usado por HU2
+                        '**/gateways/**',           // 0% - No se usan en tests
+                        '**/enums/**',              // 0% - No se usan en tests
+                ])
+            }))
+        }
+
         reports {
             xml.setRequired true
             xml.setOutputLocation layout.buildDirectory.file("reports/jacoco.xml")

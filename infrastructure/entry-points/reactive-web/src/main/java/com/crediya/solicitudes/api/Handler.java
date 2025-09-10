@@ -6,6 +6,7 @@ import com.crediya.solicitudes.api.mapper.SolicitudRestMapper;
 import com.crediya.solicitudes.model.solicitud.Solicitud;
 import com.crediya.solicitudes.model.solicitud.exception.DatosSolicitudInvalidosException;
 import com.crediya.solicitudes.model.solicitud.exception.SolicitudDuplicadaException;
+import com.crediya.solicitudes.model.solicitud.exception.TipoPrestamoNoValidoException; // AGREGAR esta excepción
 import com.crediya.solicitudes.usecase.crearsolicitud.CrearSolicitudUseCase;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -18,7 +19,7 @@ import reactor.core.publisher.Mono;
 
 /**
  * Handler REACTIVO para Router Functions (WebFlux)
- * Registrar una solicitud de préstamo de forma completamente reactiva
+ * HU2: Registrar una solicitud de préstamo de forma completamente reactiva
  */
 @Component
 @RequiredArgsConstructor
@@ -29,7 +30,7 @@ public class Handler {
     private final SolicitudRestMapper mapper;
 
     /**
-     * POST /api/v1/solicitudw
+     * POST /api/v1/solicitud
      * HU2: Como cliente, quiero enviar mi solicitud de préstamo con la información necesaria
      * COMPLETAMENTE REACTIVO - aprovecha las ventajas de WebFlux
      */
@@ -37,9 +38,9 @@ public class Handler {
         log.info("🚀 Handler - Iniciando proceso reactivo de creación de solicitud");
 
         return request.bodyToMono(CrearSolicitudRequest.class)
-                .doOnNext(req -> log.info("📝 Solicitud recibida para documento: {}", req.getNumeroDocumento()))
+                .doOnNext(req -> log.info("📄 Solicitud recibida para documento: {}", req.numeroDocumento()))
                 .flatMap(this::convertirYValidarRequest)
-                .flatMap(crearSolicitudUseCase::ejecutar) // ¡Ahora el UseCase es reactivo!
+                .flatMap(crearSolicitudUseCase::ejecutar) // ¡UseCase reactivo!
                 .flatMap(this::crearRespuestaExitosa)
                 .onErrorResume(this::manejarErrores)
                 .doOnTerminate(() -> log.info("✅ Proceso de creación de solicitud completado"));
@@ -77,22 +78,18 @@ public class Handler {
 
     /**
      * Convierte el DTO request a entidad de dominio
+     * MEJORA: Simplificado para evitar complejidad innecesaria
      */
     private Mono<Solicitud> convertirYValidarRequest(CrearSolicitudRequest request) {
-        return Mono.fromCallable(() -> {
-                    log.debug("🔄 Mapeando DTO request → entidad dominio");
-                    return mapper.toModel(request);
-                })
-                .doOnNext(solicitud -> log.debug("✅ Solicitud mapeada: {} - Monto: ${:,.2f}",
-                        solicitud.getNumeroDocumento(), solicitud.getMontoSolicitado()))
-                .onErrorMap(Exception.class, ex -> {
-                    log.error("❌ Error mapeando request: {}", ex.getMessage());
-                    return new DatosSolicitudInvalidosException("Error en los datos de la solicitud: " + ex.getMessage());
-                });
+        return Mono.just(request)
+                .map(mapper::toModel)
+                .doOnNext(solicitud -> log.debug("🔄 Solicitud mapeada: {} - Monto: ${:,.2f}",
+                        solicitud.getNumeroDocumento(), solicitud.getMontoSolicitado()));
     }
 
     /**
      * Crea respuesta exitosa (HTTP 201 Created)
+     * MANTIENE tu implementación actual - está bien
      */
     private Mono<ServerResponse> crearRespuestaExitosa(Solicitud solicitudCreada) {
         return Mono.fromCallable(() -> {
@@ -108,30 +105,34 @@ public class Handler {
 
     /**
      * Manejo de errores reactivo - convierte excepciones a respuestas HTTP apropiadas
+     * MEJORA: Agregada excepción TipoPrestamoNoValidoException
      */
     private Mono<ServerResponse> manejarErrores(Throwable error) {
         log.error("❌ Error procesando solicitud: {} - Tipo: {}", error.getMessage(), error.getClass().getSimpleName());
 
-        // Manejo específico por tipo de excepción
-        if (error instanceof SolicitudDuplicadaException) {
-            return crearRespuestaError(HttpStatus.CONFLICT, "SOLICITUD_DUPLICADA", error.getMessage());
-        }
+        // MEJORA: Manejo específico por tipo de excepción del dominio
+        return switch (error) {
+            case SolicitudDuplicadaException ex ->
+                    crearRespuestaError(HttpStatus.CONFLICT, "SOLICITUD_DUPLICADA", ex.getMessage());
 
-        if (error instanceof DatosSolicitudInvalidosException) {
-            return crearRespuestaError(HttpStatus.BAD_REQUEST, "DATOS_INVALIDOS", error.getMessage());
-        }
+            case DatosSolicitudInvalidosException ex ->
+                    crearRespuestaError(HttpStatus.BAD_REQUEST, "DATOS_INVALIDOS", ex.getMessage());
 
-        if (error instanceof IllegalArgumentException) {
-            return crearRespuestaError(HttpStatus.BAD_REQUEST, "ARGUMENTOS_INVALIDOS", error.getMessage());
-        }
+            case TipoPrestamoNoValidoException ex -> // NUEVO
+                    crearRespuestaError(HttpStatus.BAD_REQUEST, "TIPO_PRESTAMO_INVALIDO", ex.getMessage());
 
-        // Error genérico para cualquier otra excepción
-        return crearRespuestaError(HttpStatus.INTERNAL_SERVER_ERROR, "ERROR_INTERNO",
-                "Ha ocurrido un error inesperado. Por favor contacte al administrador.");
+            case IllegalArgumentException ex ->
+                    crearRespuestaError(HttpStatus.BAD_REQUEST, "ARGUMENTOS_INVALIDOS", ex.getMessage());
+
+            default ->
+                    crearRespuestaError(HttpStatus.INTERNAL_SERVER_ERROR, "ERROR_INTERNO",
+                            "Ha ocurrido un error inesperado. Por favor contacte al administrador.");
+        };
     }
 
     /**
      * Crea respuesta de error estandarizada
+     * MANTIENE tu implementación - está bien
      */
     private Mono<ServerResponse> crearRespuestaError(HttpStatus status, String codigo, String mensaje) {
         ErrorResponse errorResponse = new ErrorResponse(
@@ -149,6 +150,7 @@ public class Handler {
 
     /**
      * Crea respuesta placeholder para endpoints en construcción
+     * MANTIENE tu implementación - está bien
      */
     private PlaceholderResponse createPlaceholderResponse(String tipo, String campo, String valor) {
         return new PlaceholderResponse(
@@ -165,6 +167,7 @@ public class Handler {
 
     /**
      * DTO para respuestas de error estandarizadas
+     * MANTIENE tu implementación - está bien
      */
     public record ErrorResponse(
             String codigo,
@@ -175,6 +178,7 @@ public class Handler {
 
     /**
      * DTO para respuestas placeholder
+     * MANTIENE tu implementación - está bien
      */
     public record PlaceholderResponse(
             String message,

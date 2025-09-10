@@ -23,6 +23,14 @@ public interface SolicitudRepository {
     Mono<Solicitud> guardar(Solicitud solicitud);
 
     /**
+     * Verifica si existe una solicitud activa para un documento de forma reactiva
+     * Una solicitud activa es aquella que está en PENDIENTE_REVISION o EN_REVISION
+     * @param numeroDocumento el número de documento
+     * @return Mono<Boolean> true si existe una solicitud activa, false en caso contrario
+     */
+    Mono<Boolean> existeSolicitudActivaPorDocumento(String numeroDocumento);
+
+    /**
      * Busca una solicitud por ID único de forma reactiva
      * @param id el ID de la solicitud
      * @return Mono<Solicitud> con la solicitud si existe, Mono.empty() si no existe
@@ -42,14 +50,6 @@ public interface SolicitudRepository {
      * @return Flux<Solicitud> con todas las solicitudes históricas para ese documento
      */
     Flux<Solicitud> buscarPorDocumento(String numeroDocumento);
-
-    /**
-     * Verifica si existe una solicitud activa para un documento de forma reactiva
-     * Una solicitud activa es aquella que está en PENDIENTE_REVISION o EN_REVISION
-     * @param numeroDocumento el número de documento
-     * @return Mono<Boolean> true si existe una solicitud activa, false en caso contrario
-     */
-    Mono<Boolean> existeSolicitudActivaPorDocumento(String numeroDocumento);
 
     /**
      * Lista solicitudes por estado específico de forma reactiva
