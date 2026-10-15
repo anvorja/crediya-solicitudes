@@ -1,0 +1,118 @@
+# Aplicacion completa de CrediYa en local: SOLICITUDES llamando a AUTENTICACION, cada uno con su base de datos.
+# Los servicios se hablan por el nombre del servicio de compose (http://autenticacion:8080), no por localhost.
+#
+# Uso (desde la raiz de este repositorio, con microservicio-autenticacion clonado al lado):
+#   ./scripts/init-env.sh && docker compose --env-file .env -f deployment/docker-compose.yml up --build
+#
+# Si el repositorio de autenticacion esta en otra ruta: AUTH_REPO_PATH=/ruta/a/microservicio-autenticacion
+name: crediya
+
+services:
+  db-autenticacion:
+    image: postgres:16.15-alpine
+    environment:
+      POSTGRES_DB: crediya_auth
+      POSTGRES_USER: ${AUTH_DB_USERNAME:?Define AUTH_DB_USERNAME (ver .env.example)}
+      POSTGRES_PASSWORD: ${AUTH_DB_PASSWORD:?Define AUTH_DB_PASSWORD (ver .env.example)}
+    volumes:
+      - db-autenticacion-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [crediya-net]
+    restart: unless-stopped
+
+  db-solicitudes:
+    image: postgres:16.15-alpine
+    environment:
+      POSTGRES_DB: crediya_solicitudes
+      POSTGRES_USER: ${SOLICITUDES_DB_USERNAME:?Define SOLICITUDES_DB_USERNAME (ver .env.example)}
+      POSTGRES_PASSWORD: ${SOLICITUDES_DB_PASSWORD:?Define SOLICITUDES_DB_PASSWORD (ver .env.example)}
+    volumes:
+      - db-solicitudes-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [crediya-net]
+    restart: unless-stopped
+
+  autenticacion:
+    build:
+      context: ${AUTH_REPO_PATH:-../../microservicio-autenticacion}
+      dockerfile: deployment/Dockerfile
+    image: crediya/autenticacion:local
+    environment:
+      DB_HOST: db-autenticacion
+      DB_PORT: 5432
+      DB_NAME: crediya_auth
+      DB_USERNAME: ${AUTH_DB_USERNAME:?Define AUTH_DB_USERNAME (ver .env.example)}
+      DB_PASSWORD: ${AUTH_DB_PASSWORD:?Define AUTH_DB_PASSWORD (ver .env.example)}
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:?Define JWT_PRIVATE_KEY (./scripts/generate-jwt-key.sh)}
+      JWT_TTL_MINUTES: ${JWT_TTL_MINUTES:-60}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@crediya.local}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:?Define BOOTSTRAP_ADMIN_PASSWORD (ver .env.example)}
+      BOOTSTRAP_ADMIN_DOCUMENTO: ${BOOTSTRAP_ADMIN_DOCUMENTO:-0000000001}
+    ports:
+      - "${AUTH_PORT:-8081}:8080"
+    depends_on:
+      db-autenticacion:
+        condition: service_healthy
+    networks: [crediya-net]
+    restart: unless-stopped
+    stop_grace_period: 30s
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 768m
+
+  solicitudes:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
+    image: crediya/solicitudes:local
+    environment:
+      DB_HOST: db-solicitudes
+      DB_PORT: 5432
+      DB_NAME: crediya_solicitudes
+      DB_USERNAME: ${SOLICITUDES_DB_USERNAME:?Define SOLICITUDES_DB_USERNAME (ver .env.example)}
+      DB_PASSWORD: ${SOLICITUDES_DB_PASSWORD:?Define SOLICITUDES_DB_PASSWORD (ver .env.example)}
+      # Comunicacion entre microservicios por el nombre del servicio de compose
+      AUTH_SERVICE_URL: http://autenticacion:8080
+      AUTH_JWKS_URI: http://autenticacion:8080/.well-known/jwks.json
+    ports:
+      - "${SOLICITUDES_PORT:-8080}:8080"
+    depends_on:
+      db-solicitudes:
+        condition: service_healthy
+      autenticacion:
+        condition: service_healthy
+    networks: [crediya-net]
+    restart: unless-stopped
+    stop_grace_period: 30s
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 768m
+
+volumes:
+  db-autenticacion-data:
+  db-solicitudes-data:
+
+networks:
+  crediya-net:

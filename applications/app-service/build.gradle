@@ -13,7 +13,8 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-webflux'
     implementation 'org.springframework.boot:spring-boot-starter-data-r2dbc'
 
-    runtimeOnly('org.springframework.boot:spring-boot-devtools')
+    // Solo para desarrollo local: 'developmentOnly' lo excluye del jar que se empaqueta en la imagen
+    developmentOnly 'org.springframework.boot:spring-boot-devtools'
 
     testImplementation 'com.tngtech.archunit:archunit:1.4.1'
     testImplementation 'com.fasterxml.jackson.core:jackson-databind'

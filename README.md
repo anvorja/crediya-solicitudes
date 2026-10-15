@@ -11,7 +11,7 @@ Solicitudes de prestamo de la plataforma CrediYa. Arquitectura hexagonal / Clean
 | HU2 | Registrar una solicitud de prestamo (`POST /api/v1/solicitud`) | `feature/HU-02-solicitud` | Hecha |
 | HU3 | Autenticacion: solo un cliente crea solicitudes y solo a su nombre | `feature/HU-03-seguridad` | Hecha |
 | HU4 | Listado de solicitudes para revision manual (`GET /api/v1/solicitud`) | `feature/HU-04-listado-solicitudes` | Hecha |
-| HU5 | Contenerizacion con Docker y docker-compose | `feature/HU-05-...` | Pendiente |
+| HU5 | Contenerizacion con Docker y docker-compose | `feature/HU-05-contenerizacion` | Hecha |
 | HU6 | Aprobar o rechazar una solicitud (`PUT /api/v1/solicitud`) + notificacion | `feature/HU-06-...` | Pendiente |
 | HU7 | Validacion automatica (capacidad de endeudamiento) | `feature/HU-07-...` | Pendiente |
 
@@ -93,7 +93,34 @@ Tipos de prestamo sembrados por Flyway: `PERSONAL`, `LIBRE_INVERSION`, `VEHICULO
 | 503 | AUTENTICACION no responde (tras reintentos) o el circuit breaker esta abierto |
 | 500 | Error inesperado (mensaje generico, sin detalles internos) |
 
-## Ejecutar localmente
+## Docker: toda la aplicacion con un comando (HU5)
+
+Requiere el repositorio `microservicio-autenticacion` clonado **al lado** de este (o `AUTH_REPO_PATH=/ruta/al/repo`).
+
+```bash
+./scripts/init-env.sh        # una vez: crea .env con credenciales y clave JWT aleatorias (no se versiona)
+docker compose --env-file .env -f deployment/docker-compose.yml up --build
+```
+
+Levanta **SOLICITUDES** (http://localhost:8080), **AUTENTICACION** (http://localhost:8081) y una PostgreSQL por servicio, en una
+red propia. SOLICITUDES llama a AUTENTICACION por el nombre del servicio (`http://autenticacion:8080`) y valida los tokens
+con su JWKS; las bases de datos no se publican fuera de la red de compose.
+
+| Que se valida | Como |
+|---------------|------|
+| Cada servicio corre en contenedor | Dockerfile multi-stage por servicio; la imagen final solo lleva JRE + jar, usuario sin privilegios (uid 10001), `java` como PID 1 |
+| Las bases persisten al reiniciar | Volumenes con nombre: `docker compose down` los conserva, solo `down -v` los borra |
+| Comportamiento identico al nativo | Misma configuracion por variables de entorno; los tests de extremo a extremo y esta prueba manual dan los mismos resultados |
+| Arranque ordenado | `depends_on` con healthchecks (`pg_isready` y `/actuator/health/readiness`) |
+
+Endurecimiento: sistema de archivos de solo lectura (con `/tmp` en tmpfs), sin capacidades de Linux, `no-new-privileges`, limite de
+memoria y versiones de imagen fijadas (nada de `latest`). Los secretos se exigen por variable de entorno (`${VAR:?...}`): el
+compose no arranca si falta alguno.
+
+Escenario de prueba: el administrador (`BOOTSTRAP_ADMIN_*` del `.env`) inicia sesion en AUTENTICACION y registra un cliente y un
+asesor; el cliente inicia sesion y crea su solicitud en SOLICITUDES; el asesor la ve en el listado con nombre y salario.
+
+## Ejecutar localmente (sin Docker para la aplicacion)
 
 Requisitos: Java 21 y Docker (PostgreSQL local y tests de integracion con Testcontainers).
 
