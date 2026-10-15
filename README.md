@@ -10,7 +10,7 @@ Solicitudes de prestamo de la plataforma CrediYa. Arquitectura hexagonal / Clean
 |----|-------------|------|--------|
 | HU2 | Registrar una solicitud de prestamo (`POST /api/v1/solicitud`) | `feature/HU-02-solicitud` | Hecha |
 | HU3 | Autenticacion: solo un cliente crea solicitudes y solo a su nombre | `feature/HU-03-seguridad` | Hecha |
-| HU4 | Listado de solicitudes para revision manual (`GET /api/v1/solicitud`) | `feature/HU-04-...` | Pendiente |
+| HU4 | Listado de solicitudes para revision manual (`GET /api/v1/solicitud`) | `feature/HU-04-listado-solicitudes` | Hecha |
 | HU5 | Contenerizacion con Docker y docker-compose | `feature/HU-05-...` | Pendiente |
 | HU6 | Aprobar o rechazar una solicitud (`PUT /api/v1/solicitud`) + notificacion | `feature/HU-06-...` | Pendiente |
 | HU7 | Validacion automatica (capacidad de endeudamiento) | `feature/HU-07-...` | Pendiente |
@@ -41,10 +41,34 @@ Este servicio es un *resource server*: valida los JWT RS256 que emite AUTENTICAC
 |----------|-------------|
 | `/actuator/health`, `/v3/api-docs`, Swagger UI | Publico |
 | `POST /api/v1/solicitud` | Solo `CLIENTE`, y unicamente a nombre de su propio `documento_identidad` |
+| `GET /api/v1/solicitud` | Solo `ASESOR` |
 
 - Un token sin rol no concede ningun permiso (403). Un token invalido, vencido, de otra audiencia o firmado con otra clave da 401.
 - El token del cliente se **reenvia** a AUTENTICACION al validar al cliente, de modo que ese servicio aplica sus propias reglas.
 - Los errores 401/403 usan el mismo formato JSON que el resto de la API y no revelan el motivo del rechazo.
+
+## Listado para revision manual (HU4)
+
+`GET /api/v1/solicitud` (solo `ASESOR`) lista las solicitudes que necesitan decision: **Pendiente de revision**, **Revision manual**
+y **Rechazada**, de la mas antigua a la mas reciente. Cada fila incluye `monto`, `plazo`, `email`, `nombre`, `tipo_prestamo`,
+`tasa_interes`, `estado_solicitud`, `salario_base` y `deuda_total_mensual_solicitudes_aprobadas`.
+
+| Parametro | Descripcion |
+|-----------|-------------|
+| `estado` | Estados a incluir, repetidos o separados por coma. Solo admite los tres de revision (no `APROBADA`) |
+| `tipo_prestamo` | Nombre del tipo, sin distinguir mayusculas |
+| `pagina` | Empieza en 0 (por defecto 0) |
+| `tamano` | De 1 a 50 (por defecto 10) |
+
+```bash
+curl -H "Authorization: Bearer $TOKEN_ASESOR" 'http://localhost:8080/api/v1/solicitud?estado=RECHAZADA,REVISION_MANUAL&pagina=0&tamano=20'
+```
+
+La respuesta es `{ contenido: [...], pagina, tamano, total_elementos, total_paginas }`. Para evitar una consulta por fila, el
+servicio hace **una** consulta por lotes a AUTENTICACION (nombre y salario) y **una** a la base (aprobadas de esos correos).
+La deuda mensual suma la cuota de cada prestamo aprobado con la formula de amortizacion
+`P * i * (1 + i)^n / ((1 + i)^n - 1)` (i = tasa mensual del tipo, n = plazo en meses). Si AUTENTICACION ya no conoce al
+solicitante, `nombre` y `salario_base` salen nulos pero la solicitud sigue apareciendo.
 
 ## Registrar una solicitud (HU2)
 

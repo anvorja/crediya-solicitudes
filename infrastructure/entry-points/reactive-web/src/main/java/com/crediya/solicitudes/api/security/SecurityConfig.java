@@ -45,6 +45,7 @@ public class SecurityConfig {
                         .pathMatchers(HttpMethod.OPTIONS).permitAll()
                         .pathMatchers(RUTAS_PUBLICAS).permitAll()
                         .pathMatchers(HttpMethod.POST, ApiRoutes.SOLICITUD).hasRole(Rol.CLIENTE.name())
+                        .pathMatchers(HttpMethod.GET, ApiRoutes.SOLICITUD).hasRole(Rol.ASESOR.name())
                         .anyExchange().authenticated())
                 .exceptionHandling(errores -> errores
                         .authenticationEntryPoint(erroresDeSeguridad)

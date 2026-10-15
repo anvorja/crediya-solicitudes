@@ -7,7 +7,10 @@ import com.crediya.solicitudes.api.validation.RequestValidator;
 import com.crediya.solicitudes.model.cliente.exceptions.ClienteNoEncontradoException;
 import com.crediya.solicitudes.model.cliente.exceptions.ServicioNoDisponibleException;
 import com.crediya.solicitudes.model.common.exceptions.AccesoDenegadoException;
+import com.crediya.solicitudes.model.common.Pagina;
 import com.crediya.solicitudes.model.solicitud.EstadoSolicitud;
+import com.crediya.solicitudes.model.solicitud.ResumenSolicitud;
+import com.crediya.solicitudes.model.solicitud.queries.FiltroSolicitudes;
 import com.crediya.solicitudes.model.solicitud.Solicitud;
 import com.crediya.solicitudes.model.solicitud.commands.CrearSolicitudCommand;
 import com.crediya.solicitudes.model.solicitud.exceptions.DatosSolicitudInvalidosException;
@@ -15,6 +18,7 @@ import com.crediya.solicitudes.model.solicitud.exceptions.MontoFueraDeRangoExcep
 import com.crediya.solicitudes.model.solicitud.exceptions.TipoPrestamoNoValidoException;
 import com.crediya.solicitudes.model.tipoprestamo.TipoPrestamo;
 import com.crediya.solicitudes.usecase.crearsolicitud.CrearSolicitudUseCase;
+import com.crediya.solicitudes.usecase.listarsolicitudes.ListarSolicitudesUseCase;
 import jakarta.validation.Validation;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -33,6 +37,7 @@ import org.springframework.web.reactive.function.server.HandlerStrategies;
 import reactor.core.publisher.Mono;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -54,11 +59,14 @@ class SolicitudRouterTest {
     @Mock
     private CrearSolicitudUseCase useCase;
 
+    @Mock
+    private ListarSolicitudesUseCase listarUseCase;
+
     private WebTestClient client;
 
     @BeforeEach
     void setUp() {
-        var handler = new SolicitudHandler(useCase, new SolicitudRestMapperImpl(),
+        var handler = new SolicitudHandler(useCase, listarUseCase, new SolicitudRestMapperImpl(),
                 new RequestValidator(Validation.buildDefaultValidatorFactory().getValidator()));
         var errorHandler = new GlobalErrorHandler(new DefaultErrorAttributes(), new WebProperties(),
                 new StaticApplicationContext(), ServerCodecConfigurer.create());
@@ -239,5 +247,125 @@ class SolicitudRouterTest {
         post(CUERPO_VALIDO)
                 .expectStatus().isForbidden()
                 .expectBody().jsonPath("$.codigo").isEqualTo("ACCESO_DENEGADO");
+    }
+
+    // ---------- HU4: listado ----------
+
+    private static ResumenSolicitud resumen(String nombre, BigDecimal salario, String deuda) {
+        var solicitud = new Solicitud(UUID.randomUUID(), new BigDecimal("5000000"), 24, "maria@example.com",
+                EstadoSolicitud.PENDIENTE_REVISION, PERSONAL);
+        return new ResumenSolicitud(solicitud, nombre, salario, new BigDecimal(deuda));
+    }
+
+    @Test
+    @DisplayName("GET listado: debe devolver la pagina con los campos de la HU4 en snake_case")
+    void listar_debeDevolverLaPaginaConLosCamposDeLaHu() {
+        when(listarUseCase.ejecutar(any())).thenReturn(Mono.just(new Pagina<>(
+                List.of(resumen("Maria Gomez", new BigDecimal("4500000"), "258404.18")), 0, 10, 21)));
+
+        client.get().uri(RUTA).exchange()
+                .expectStatus().isOk()
+                .expectHeader().contentType(MediaType.APPLICATION_JSON)
+                .expectBody()
+                .jsonPath("$.pagina").isEqualTo(0)
+                .jsonPath("$.tamano").isEqualTo(10)
+                .jsonPath("$.total_elementos").isEqualTo(21)
+                .jsonPath("$.total_paginas").isEqualTo(3)
+                .jsonPath("$.contenido[0].monto").isEqualTo(5000000)
+                .jsonPath("$.contenido[0].plazo").isEqualTo(24)
+                .jsonPath("$.contenido[0].email").isEqualTo("maria@example.com")
+                .jsonPath("$.contenido[0].nombre").isEqualTo("Maria Gomez")
+                .jsonPath("$.contenido[0].tipo_prestamo").isEqualTo("PERSONAL")
+                .jsonPath("$.contenido[0].tasa_interes").isEqualTo(0.018)
+                .jsonPath("$.contenido[0].estado_solicitud").isEqualTo("PENDIENTE_REVISION")
+                .jsonPath("$.contenido[0].salario_base").isEqualTo(4500000)
+                .jsonPath("$.contenido[0].deuda_total_mensual_solicitudes_aprobadas").isEqualTo(258404.18);
+    }
+
+    @Test
+    @DisplayName("GET listado: cuando AUTENTICACION no conoce al solicitante, debe omitir nombre y salario")
+    void listar_clienteDesconocido_debeDevolverNulos() {
+        when(listarUseCase.ejecutar(any())).thenReturn(Mono.just(new Pagina<>(List.of(resumen(null, null, "0")), 0, 10, 1)));
+
+        client.get().uri(RUTA).exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.contenido[0].nombre").isEmpty()
+                .jsonPath("$.contenido[0].salario_base").isEmpty()
+                .jsonPath("$.contenido[0].deuda_total_mensual_solicitudes_aprobadas").isEqualTo(0);
+    }
+
+    @Test
+    @DisplayName("GET listado: sin parametros debe usar el filtro por defecto")
+    void listar_sinParametros_debeUsarFiltroPorDefecto() {
+        when(listarUseCase.ejecutar(any())).thenReturn(Mono.just(new Pagina<>(List.of(), 0, 10, 0)));
+
+        client.get().uri(RUTA).exchange().expectStatus().isOk()
+                .expectBody().jsonPath("$.contenido.length()").isEqualTo(0).jsonPath("$.total_paginas").isEqualTo(0);
+
+        var filtro = ArgumentCaptor.forClass(FiltroSolicitudes.class);
+        verify(listarUseCase).ejecutar(filtro.capture());
+        assertThat(filtro.getValue().estados()).isEqualTo(EstadoSolicitud.PARA_REVISION_MANUAL);
+        assertThat(filtro.getValue().tipoPrestamo()).isNull();
+        assertThat(filtro.getValue().pagina()).isZero();
+        assertThat(filtro.getValue().tamano()).isEqualTo(10);
+    }
+
+    @Test
+    @DisplayName("GET listado: debe interpretar estados repetidos y separados por coma, tipo, pagina y tamano")
+    void listar_debeInterpretarLosParametros() {
+        when(listarUseCase.ejecutar(any())).thenReturn(Mono.just(new Pagina<>(List.of(), 2, 25, 0)));
+
+        client.get().uri(uri -> uri.path(RUTA)
+                        .queryParam("estado", "rechazada,revision_manual").queryParam("estado", "PENDIENTE_REVISION")
+                        .queryParam("tipo_prestamo", "personal").queryParam("pagina", "2").queryParam("tamano", "25").build())
+                .exchange().expectStatus().isOk();
+
+        var filtro = ArgumentCaptor.forClass(FiltroSolicitudes.class);
+        verify(listarUseCase).ejecutar(filtro.capture());
+        assertThat(filtro.getValue().estados()).containsExactlyInAnyOrder(
+                EstadoSolicitud.RECHAZADA, EstadoSolicitud.REVISION_MANUAL, EstadoSolicitud.PENDIENTE_REVISION);
+        assertThat(filtro.getValue().tipoPrestamo()).isEqualTo("personal");
+        assertThat(filtro.getValue().pagina()).isEqualTo(2);
+        assertThat(filtro.getValue().tamano()).isEqualTo(25);
+    }
+
+    @Test
+    @DisplayName("GET listado: cuando pagina o tamano no son enteros, debe responder 400 con el detalle de ambos")
+    void listar_enterosInvalidos_debeResponder400() {
+        client.get().uri(RUTA + "?pagina=abc&tamano=1.5").exchange()
+                .expectStatus().isBadRequest()
+                .expectBody()
+                .jsonPath("$.codigo").isEqualTo("VALIDACION_FALLIDA")
+                .jsonPath("$.detalles.pagina").isNotEmpty()
+                .jsonPath("$.detalles.tamano").isNotEmpty();
+
+        verify(listarUseCase, never()).ejecutar(any());
+    }
+
+    @Test
+    @DisplayName("GET listado: cuando el estado no existe o no es de revision, debe responder 400 con el codigo del dominio")
+    void listar_estadoInvalido_debeResponder400() {
+        client.get().uri(RUTA + "?estado=INEXISTENTE").exchange()
+                .expectStatus().isBadRequest().expectBody().jsonPath("$.codigo").isEqualTo("DATOS_SOLICITUD_INVALIDOS");
+        client.get().uri(RUTA + "?estado=APROBADA").exchange()
+                .expectStatus().isBadRequest().expectBody().jsonPath("$.codigo").isEqualTo("DATOS_SOLICITUD_INVALIDOS");
+    }
+
+    @Test
+    @DisplayName("GET listado: cuando el tamano esta fuera de 1 y 50 o la pagina es negativa, debe responder 400")
+    void listar_paginacionInvalida_debeResponder400() {
+        client.get().uri(RUTA + "?tamano=51").exchange().expectStatus().isBadRequest();
+        client.get().uri(RUTA + "?tamano=0").exchange().expectStatus().isBadRequest();
+        client.get().uri(RUTA + "?pagina=-1").exchange().expectStatus().isBadRequest();
+    }
+
+    @Test
+    @DisplayName("GET listado: cuando el dominio deniega el acceso, debe responder 403")
+    void listar_denegado_debeResponder403() {
+        when(listarUseCase.ejecutar(any())).thenReturn(Mono.error(new AccesoDenegadoException()));
+
+        client.get().uri(RUTA).exchange()
+                .expectStatus().isForbidden().expectBody().jsonPath("$.codigo").isEqualTo("ACCESO_DENEGADO");
     }
 }

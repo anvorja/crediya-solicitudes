@@ -39,6 +39,13 @@ public record Solicitud(
         return new Solicitud(null, monto, plazo, email.trim().toLowerCase(), EstadoSolicitud.PENDIENTE_REVISION, tipoPrestamo);
     }
 
+    /**
+     * Cuota mensual que el solicitante pagaria (o paga) por esta solicitud.
+     */
+    public BigDecimal cuotaMensual() {
+        return Amortizacion.cuotaMensual(monto, tipoPrestamo.tasaInteres(), plazo);
+    }
+
     public Solicitud conId(UUID nuevoId) {
         return new Solicitud(nuevoId, monto, plazo, email, estado, tipoPrestamo);
     }

@@ -9,15 +9,20 @@ import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.github.resilience4j.reactor.circuitbreaker.operator.CircuitBreakerOperator;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.ClientResponse;
 import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
 
 import java.time.Duration;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
 
 /**
  * Consulta a AUTENTICACION al cliente que hace la solicitud.
@@ -29,7 +34,8 @@ public class ClienteGatewayAdapter implements ClienteGateway {
 
     static final String SERVICIO = "autenticacion";
     static final String CIRCUIT_BREAKER = "clienteGateway";
-    private static final String RUTA = "/api/v1/usuarios/{documento}";
+    private static final String RUTA_BASE = "/api/v1/usuarios";
+    private static final String RUTA_POR_DOCUMENTO = RUTA_BASE + "/{documento}";
 
     private final WebClient client;
     private final CircuitBreaker circuitBreaker;
@@ -51,17 +57,46 @@ public class ClienteGatewayAdapter implements ClienteGateway {
 
     @Override
     public Mono<Cliente> buscarPorDocumento(String documentoIdentidad) {
-        return client.get()
-                .uri(RUTA, documentoIdentidad)
+        return conPoliticaDeResiliencia(client.get()
+                .uri(RUTA_POR_DOCUMENTO, documentoIdentidad)
                 .accept(MediaType.APPLICATION_JSON)
                 .exchangeToMono(this::interpretar)
+                .doOnSubscribe(s -> log.info("Consultando cliente en el servicio de {}", SERVICIO)));
+    }
+
+    @Override
+    public Flux<Cliente> buscarPorEmails(Collection<String> emails) {
+        if (emails.isEmpty()) {
+            return Flux.empty();
+        }
+        Mono<List<UsuarioAutenticacionResponse>> llamada = client.get()
+                .uri(uri -> uri.path(RUTA_BASE).queryParam("correos", "{correos}").build(Map.of("correos", String.join(",", emails))))
+                .accept(MediaType.APPLICATION_JSON)
+                .exchangeToMono(this::interpretarLista)
+                .doOnSubscribe(s -> log.info("Consultando {} clientes por correo en el servicio de {}", emails.size(), SERVICIO));
+        return conPoliticaDeResiliencia(llamada).flatMapMany(Flux::fromIterable).map(ClienteGatewayAdapter::aCliente);
+    }
+
+    /**
+     * Timeout, reintentos con backoff solo ante fallos transitorios y circuit breaker; cualquier falla del servicio se
+     * traduce a {@link ServicioNoDisponibleException}.
+     */
+    private <T> Mono<T> conPoliticaDeResiliencia(Mono<T> llamada) {
+        return llamada
                 .timeout(timeout)
                 .retryWhen(Retry.backoff(maximoReintentos, backoff)
                         .filter(ClienteGatewayAdapter::esTransitorio)
                         .onRetryExhaustedThrow((especificacion, senal) -> senal.failure()))
                 .transformDeferred(CircuitBreakerOperator.of(circuitBreaker))
-                .doOnSubscribe(s -> log.info("Consultando cliente en el servicio de {}", SERVICIO))
                 .onErrorMap(ClienteGatewayAdapter::esFallaDelServicio, this::aErrorDeDominio);
+    }
+
+    private Mono<List<UsuarioAutenticacionResponse>> interpretarLista(ClientResponse respuesta) {
+        HttpStatusCode estado = respuesta.statusCode();
+        if (estado.is2xxSuccessful()) {
+            return respuesta.bodyToMono(new ParameterizedTypeReference<>() { });
+        }
+        return respuesta.releaseBody().then(Mono.error(new RespuestaInesperada(estado)));
     }
 
     private Mono<Cliente> interpretar(ClientResponse respuesta) {
