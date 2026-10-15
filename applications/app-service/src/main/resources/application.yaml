@@ -1,0 +1,71 @@
+server:
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+
+spring:
+  application:
+    name: "MicroservicioSolicitudes"
+  devtools:
+    add-properties: false
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+  flyway:
+    enabled: true
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:crediya_solicitudes}
+    user: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    locations: classpath:db/migration
+    validate-on-migrate: true
+    clean-disabled: true
+
+# Los secretos se inyectan por variables de entorno (ver README y .env.example)
+adapters:
+  r2dbc:
+    host: ${DB_HOST:localhost}
+    port: ${DB_PORT:5432}
+    database: ${DB_NAME:crediya_solicitudes}
+    schema: ${DB_SCHEMA:public}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+
+# Servicio de AUTENTICACION (en docker-compose: http://autenticacion:8080)
+adapter:
+  restconsumer:
+    url: ${AUTH_SERVICE_URL:http://localhost:8081}
+    timeout: ${AUTH_SERVICE_TIMEOUT_MS:3000}
+    max-retries: 2
+    retry-backoff-ms: 100
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      clienteGateway:
+        registerHealthIndicator: true
+        slidingWindowType: COUNT_BASED
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10s
+        permittedNumberOfCallsInHalfOpenState: 3
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "health,prometheus"
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  health:
+    circuitbreakers:
+      enabled: true
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs
+
+cors:
+  allowed-origins: "http://localhost:4200,http://localhost:8080"
