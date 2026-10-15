@@ -1,0 +1,157 @@
+# CI/CD de crediya-solicitudes (microservicio de solicitudes). Los tres jobs se llaman exactamente como los exigen las rulesets de main y develop
+# (Settings > Rules): "Lint", "Calidad y build" e "Imagen Docker". Si renombras uno, actualiza la ruleset.
+name: CI
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop, main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dockerfile (hadolint)
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: deployment/Dockerfile
+          failure-threshold: warning
+
+      - name: Scripts de shell (shellcheck)
+        run: shellcheck scripts/*.sh deployment/localstack/init.sh
+
+      - name: docker-compose valido
+        run: docker compose -f deployment/docker-compose.yml config --quiet
+        env:
+          AUTH_DB_USERNAME: ci-valor-ficticio
+          AUTH_DB_PASSWORD: ci-valor-ficticio
+          SOLICITUDES_DB_USERNAME: ci-valor-ficticio
+          SOLICITUDES_DB_PASSWORD: ci-valor-ficticio
+          JWT_PRIVATE_KEY: ci-valor-ficticio
+          BOOTSTRAP_ADMIN_PASSWORD: ci-valor-ficticio
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Estructura de Clean Architecture (dominio sin dependencias de infraestructura)
+        run: ./gradlew validateStructure --console=plain
+
+  calidad-y-build:
+    name: Calidad y build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # Compila, ejecuta las pruebas unitarias y de integracion (Testcontainers usa el Docker del runner) y exige la
+      # cobertura minima del 90% en dominio (model y usecase)
+      - name: Build, pruebas y cobertura
+        run: ./gradlew build jacocoMergedReport --console=plain
+
+      - name: Resumen de cobertura
+        if: always()
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import glob, re
+          rutas = glob.glob('build/reports/jacocoMergedReport/*.xml')
+          if not rutas:
+              print('Sin reporte de cobertura')
+          else:
+              xml = open(rutas[0]).read()
+              print('| Contador | Cobertura |\n|---|---|')
+              for tipo, nombre in (('LINE', 'Lineas'), ('BRANCH', 'Ramas')):
+                  perdidas, cubiertas = map(int, re.findall(r'<counter type="%s" missed="(\d+)" covered="(\d+)"/>' % tipo, xml)[-1])
+                  print('| %s | %.1f%% |' % (nombre, 100 * cubiertas / (perdidas + cubiertas)))
+          PY
+
+      - name: Publicar reportes de pruebas y cobertura
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reportes
+          retention-days: 14
+          path: |
+            build/reports/jacocoMergedReport
+            **/build/reports/tests
+            **/build/test-results
+
+  imagen-docker:
+    name: Imagen Docker
+    runs-on: ubuntu-latest
+    needs: [lint, calidad-y-build]
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=ref,event=branch
+            type=sha,format=short
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Construir la imagen
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deployment/Dockerfile
+          load: true
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: La imagen no corre como root
+        run: |
+          usuario="$(docker run --rm --entrypoint id "$(echo '${{ steps.meta.outputs.tags }}' | head -n1)" -u)"
+          echo "uid del proceso: $usuario"
+          test "$usuario" != "0"
+
+      # CD: solo al integrar en develop o main (no en PR) se publica la imagen en GitHub Container Registry
+      - name: Iniciar sesion en ghcr.io
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publicar la imagen
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deployment/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
