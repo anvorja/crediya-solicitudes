@@ -53,6 +53,7 @@ subprojects {
             testImplementation platform("org.springframework.boot:spring-boot-dependencies:${springBootVersion}")
         } else {
             implementation platform("org.springframework.boot:spring-boot-dependencies:${springBootVersion}")
+            implementation platform('software.amazon.awssdk:bom:2.32.13')
         }
     }
 

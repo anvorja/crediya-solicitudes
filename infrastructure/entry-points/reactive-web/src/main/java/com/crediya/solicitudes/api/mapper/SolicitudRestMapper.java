@@ -1,5 +1,6 @@
 package com.crediya.solicitudes.api.mapper;
 
+import com.crediya.solicitudes.api.dto.request.ActualizarEstadoRequest;
 import com.crediya.solicitudes.api.dto.request.CrearSolicitudRequest;
 import com.crediya.solicitudes.api.dto.response.PaginaResponse;
 import com.crediya.solicitudes.api.dto.response.SolicitudResponse;
@@ -7,6 +8,7 @@ import com.crediya.solicitudes.api.dto.response.SolicitudResumenResponse;
 import com.crediya.solicitudes.model.common.Pagina;
 import com.crediya.solicitudes.model.solicitud.ResumenSolicitud;
 import com.crediya.solicitudes.model.solicitud.Solicitud;
+import com.crediya.solicitudes.model.solicitud.commands.ActualizarEstadoSolicitudCommand;
 import com.crediya.solicitudes.model.solicitud.commands.CrearSolicitudCommand;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
@@ -15,6 +17,8 @@ import org.mapstruct.Mapping;
 public interface SolicitudRestMapper {
 
     CrearSolicitudCommand toCommand(CrearSolicitudRequest request);
+
+    ActualizarEstadoSolicitudCommand toCommand(ActualizarEstadoRequest request);
 
     @Mapping(source = "id", target = "idSolicitud")
     @Mapping(source = "tipoPrestamo.nombre", target = "tipoPrestamo")

@@ -2,6 +2,7 @@ package com.crediya.solicitudes.model.solicitud;
 
 import com.crediya.solicitudes.model.solicitud.exceptions.DatosSolicitudInvalidosException;
 import com.crediya.solicitudes.model.solicitud.exceptions.MontoFueraDeRangoException;
+import com.crediya.solicitudes.model.solicitud.exceptions.TransicionEstadoInvalidaException;
 import com.crediya.solicitudes.model.tipoprestamo.TipoPrestamo;
 
 import java.math.BigDecimal;
@@ -44,6 +45,16 @@ public record Solicitud(
      */
     public BigDecimal cuotaMensual() {
         return Amortizacion.cuotaMensual(monto, tipoPrestamo.tasaInteres(), plazo);
+    }
+
+    /**
+     * Devuelve la solicitud en el nuevo estado, o falla si la transicion no esta permitida.
+     */
+    public Solicitud cambiarEstado(EstadoSolicitud nuevoEstado) {
+        if (!estado.puedeTransicionarA(nuevoEstado)) {
+            throw new TransicionEstadoInvalidaException(estado, nuevoEstado);
+        }
+        return new Solicitud(id, monto, plazo, email, nuevoEstado, tipoPrestamo);
     }
 
     public Solicitud conId(UUID nuevoId) {

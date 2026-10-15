@@ -30,6 +30,27 @@ public enum EstadoSolicitud {
     }
 
     /**
+     * Transiciones permitidas. Desde Pendiente se puede ir a cualquier otro estado (la validacion automatica decide cualquiera
+     * de los tres); desde Revision manual solo se decide; una solicitud Rechazada puede ser reconsiderada y aprobada por un
+     * asesor (HU4 la lista para revision); Aprobada es final.
+     */
+    public boolean puedeTransicionarA(EstadoSolicitud nuevo) {
+        return switch (this) {
+            case PENDIENTE_REVISION -> nuevo != PENDIENTE_REVISION;
+            case REVISION_MANUAL -> nuevo == APROBADA || nuevo == RECHAZADA;
+            case RECHAZADA -> nuevo == APROBADA;
+            case APROBADA -> false;
+        };
+    }
+
+    /**
+     * Estados con los que un asesor cierra una solicitud (HU6).
+     */
+    public boolean esDecisionFinal() {
+        return this == APROBADA || this == RECHAZADA;
+    }
+
+    /**
      * Convierte el nombre de un estado ignorando mayusculas y espacios.
      */
     public static EstadoSolicitud desde(String texto) {

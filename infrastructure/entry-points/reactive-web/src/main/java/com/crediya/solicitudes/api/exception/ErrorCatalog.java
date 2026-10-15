@@ -5,7 +5,10 @@ import com.crediya.solicitudes.model.common.exceptions.AccesoDenegadoException;
 import com.crediya.solicitudes.model.cliente.exceptions.ServicioNoDisponibleException;
 import com.crediya.solicitudes.model.solicitud.exceptions.DatosSolicitudInvalidosException;
 import com.crediya.solicitudes.model.solicitud.exceptions.MontoFueraDeRangoException;
+import com.crediya.solicitudes.model.solicitud.exceptions.SolicitudModificadaException;
+import com.crediya.solicitudes.model.solicitud.exceptions.SolicitudNoEncontradaException;
 import com.crediya.solicitudes.model.solicitud.exceptions.TipoPrestamoNoValidoException;
+import com.crediya.solicitudes.model.solicitud.exceptions.TransicionEstadoInvalidaException;
 import org.springframework.http.HttpStatus;
 
 import java.util.Map;
@@ -28,7 +31,10 @@ public final class ErrorCatalog {
             TipoPrestamoNoValidoException.CODE, HttpStatus.BAD_REQUEST,
             ClienteNoEncontradoException.CODE, HttpStatus.NOT_FOUND,
             ServicioNoDisponibleException.CODE, HttpStatus.SERVICE_UNAVAILABLE,
-            AccesoDenegadoException.CODE, HttpStatus.FORBIDDEN
+            AccesoDenegadoException.CODE, HttpStatus.FORBIDDEN,
+            SolicitudNoEncontradaException.CODE, HttpStatus.NOT_FOUND,
+            TransicionEstadoInvalidaException.CODE, HttpStatus.CONFLICT,
+            SolicitudModificadaException.CODE, HttpStatus.CONFLICT
     );
 
     private ErrorCatalog() {

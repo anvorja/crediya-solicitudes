@@ -2,12 +2,14 @@ package com.crediya.solicitudes.api.solicitud;
 
 import com.crediya.solicitudes.api.constants.ApiRoutes;
 import com.crediya.solicitudes.api.constants.ValidationMessages;
+import com.crediya.solicitudes.api.dto.request.ActualizarEstadoRequest;
 import com.crediya.solicitudes.api.dto.request.CrearSolicitudRequest;
 import com.crediya.solicitudes.api.mapper.SolicitudRestMapper;
 import com.crediya.solicitudes.api.validation.RequestValidationException;
 import com.crediya.solicitudes.api.validation.RequestValidator;
 import com.crediya.solicitudes.model.solicitud.EstadoSolicitud;
 import com.crediya.solicitudes.model.solicitud.queries.FiltroSolicitudes;
+import com.crediya.solicitudes.usecase.actualizarestado.ActualizarEstadoSolicitudUseCase;
 import com.crediya.solicitudes.usecase.crearsolicitud.CrearSolicitudUseCase;
 import com.crediya.solicitudes.usecase.listarsolicitudes.ListarSolicitudesUseCase;
 import lombok.RequiredArgsConstructor;
@@ -31,6 +33,7 @@ public class SolicitudHandler {
 
     private final CrearSolicitudUseCase crearSolicitudUseCase;
     private final ListarSolicitudesUseCase listarSolicitudesUseCase;
+    private final ActualizarEstadoSolicitudUseCase actualizarEstadoSolicitudUseCase;
     private final SolicitudRestMapper mapper;
     private final RequestValidator validator;
 
@@ -50,6 +53,21 @@ public class SolicitudHandler {
                         .contentType(MediaType.APPLICATION_JSON)
                         .bodyValue(response))
                 .doOnSuccess(respuesta -> log.info("Solicitud de prestamo registrada"));
+    }
+
+    /**
+     * PUT /api/v1/solicitud (HU6): un asesor aprueba o rechaza una solicitud.
+     */
+    public Mono<ServerResponse> actualizarEstado(ServerRequest request) {
+        return request.bodyToMono(ActualizarEstadoRequest.class)
+                .switchIfEmpty(Mono.error(() -> new RequestValidationException(
+                        Map.of(ValidationMessages.CAMPO_CUERPO, ValidationMessages.CUERPO_REQUERIDO))))
+                .flatMap(validator::validar)
+                .doOnNext(body -> log.info("Peticion de cambio de estado de solicitud recibida"))
+                .map(mapper::toCommand)
+                .flatMap(actualizarEstadoSolicitudUseCase::ejecutar)
+                .map(mapper::toResponse)
+                .flatMap(response -> ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).bodyValue(response));
     }
 
     /**

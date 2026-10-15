@@ -1,9 +1,11 @@
 apply plugin: 'org.springframework.boot'
 
 dependencies {
+	implementation project(':sqs-sender')
+	implementation project(':metrics')
+	implementation 'software.amazon.awssdk:sts'
 	implementation project(':security-context')
     implementation project(':rest-consumer')
-    implementation project(':security-context')
     implementation project(':r2dbc-postgresql')
     implementation project(':reactive-web')
     implementation project(':model')
@@ -20,6 +22,8 @@ dependencies {
     testImplementation 'com.fasterxml.jackson.core:jackson-databind'
     testImplementation 'org.springframework.security:spring-security-oauth2-jose'
     testImplementation 'org.testcontainers:postgresql'
+    testImplementation 'org.testcontainers:localstack'
+    testImplementation 'software.amazon.awssdk:sqs'
     testImplementation 'org.testcontainers:junit-jupiter'
     testImplementation 'com.squareup.okhttp3:okhttp:5.1.0'
     testImplementation 'com.squareup.okhttp3:mockwebserver:5.1.0'

@@ -12,7 +12,7 @@ Solicitudes de prestamo de la plataforma CrediYa. Arquitectura hexagonal / Clean
 | HU3 | Autenticacion: solo un cliente crea solicitudes y solo a su nombre | `feature/HU-03-seguridad` | Hecha |
 | HU4 | Listado de solicitudes para revision manual (`GET /api/v1/solicitud`) | `feature/HU-04-listado-solicitudes` | Hecha |
 | HU5 | Contenerizacion con Docker y docker-compose | `feature/HU-05-contenerizacion` | Hecha |
-| HU6 | Aprobar o rechazar una solicitud (`PUT /api/v1/solicitud`) + notificacion | `feature/HU-06-...` | Pendiente |
+| HU6 | Aprobar o rechazar una solicitud (`PUT /api/v1/solicitud`) + notificacion | `feature/HU-06-aprobar-rechazar-solicitud` | Hecha |
 | HU7 | Validacion automatica (capacidad de endeudamiento) | `feature/HU-07-...` | Pendiente |
 
 ## Estructura
@@ -70,6 +70,32 @@ La deuda mensual suma la cuota de cada prestamo aprobado con la formula de amort
 `P * i * (1 + i)^n / ((1 + i)^n - 1)` (i = tasa mensual del tipo, n = plazo en meses). Si AUTENTICACION ya no conoce al
 solicitante, `nombre` y `salario_base` salen nulos pero la solicitud sigue apareciendo.
 
+## Aprobar o rechazar una solicitud y notificar (HU6)
+
+`PUT /api/v1/solicitud` con `{"id_solicitud": "<uuid>", "estado": "APROBADA" | "RECHAZADA"}`. Solo un **ASESOR**.
+
+| Desde \ Hacia | Pendiente | Revision manual | Aprobada | Rechazada |
+|--------------|-----------|-----------------|----------|-----------|
+| Pendiente de revision | no | si | si | si |
+| Revision manual | no | no | si | si |
+| Rechazada | no | no | si (reconsiderada) | no |
+| Aprobada | no | no | no | no |
+
+Errores: `404 SOLICITUD_NO_ENCONTRADA`, `409 TRANSICION_ESTADO_INVALIDA`, `409 SOLICITUD_MODIFICADA` (otro asesor decidio al mismo
+tiempo: el `UPDATE` solo aplica si el estado sigue siendo el que se leyo), `400` si el estado no es `APROBADA`/`RECHAZADA`.
+
+**Como llega el correo sin perder avisos (outbox).** El cambio de estado y el evento `SOLICITUD_DECIDIDA` se guardan en la misma
+transaccion (tabla `evento_saliente`); un relevo (`OutboxRelay`, cada `OUTBOX_INTERVALO`, `OUTBOX_LOTE` por ronda) los publica en la
+cola `crediya-notificaciones`, de donde los lee la Lambda `lambda-notificaciones`, que publica el correo en el topico SNS
+`crediya-correos`. Si la cola no responde, la decision queda guardada y el evento pendiente se reintenta (`intentos`,
+`ultimo_error`). La entrega es *al menos una vez*; el contrato lleva `id_evento` para que los consumidores deduplique. Varias
+instancias pueden correr el relevo a la vez (`FOR UPDATE SKIP LOCKED`). La consulta del nombre del solicitante a AUTENTICACION se
+hace antes de abrir la transaccion; si AUTENTICACION no lo conoce, el correo sale sin nombre.
+
+AWS: `adapter.sqs.*` se configura por variables de entorno (`AWS_REGION`, `AWS_ENDPOINT_URL` solo en LocalStack,
+`SQS_NOTIFICACIONES_URL`). Las credenciales **no** estan en el codigo ni en `application.yaml`: el SDK las toma del rol de la tarea
+(ECS), de variables de entorno o de un perfil. Permiso necesario: `sqs:SendMessage` sobre la cola de notificaciones.
+
 ## Registrar una solicitud (HU2)
 
 El cliente se valida contra AUTENTICACION (`GET /api/v1/usuarios/{documento}`) y el email de la solicitud es el del cliente.
@@ -102,8 +128,14 @@ Requiere el repositorio `microservicio-autenticacion` clonado **al lado** de est
 docker compose --env-file .env -f deployment/docker-compose.yml up --build
 ```
 
-Levanta **SOLICITUDES** (http://localhost:8080), **AUTENTICACION** (http://localhost:8081) y una PostgreSQL por servicio, en una
-red propia. SOLICITUDES llama a AUTENTICACION por el nombre del servicio (`http://autenticacion:8080`) y valida los tokens
+Levanta **SOLICITUDES** (http://localhost:8080), **AUTENTICACION** (http://localhost:8081), una PostgreSQL por servicio y
+**LocalStack** (SQS, SNS y Lambda) en una red propia. Un servicio de un solo uso (`aws-init`) crea las colas con su DLQ, el topico
+`crediya-correos`, un buzon para ver los correos y despliega la Lambda de notificaciones, compilada desde su repositorio
+(`NOTIFICACIONES_REPO_PATH`, por defecto `../../lambda-notificaciones`). Las credenciales `test` del compose son ficticias y solo
+valen contra LocalStack. Para ver el correo de una aprobacion:
+`docker run --rm --network crediya_crediya-net -e AWS_ACCESS_KEY_ID=test -e AWS_SECRET_ACCESS_KEY=test amazon/aws-cli:2.27.50 --endpoint-url http://localstack:4566 --region us-east-1 sqs receive-message --queue-url http://localstack:4566/000000000000/crediya-correos-buzon --message-attribute-names All`.
+LocalStack se fija en `4.9.2`: las imagenes `latest` posteriores exigen un `LOCALSTACK_AUTH_TOKEN`.
+SOLICITUDES llama a AUTENTICACION por el nombre del servicio de compose (`http://autenticacion:8080`) y valida los tokens
 con su JWKS; las bases de datos no se publican fuera de la red de compose.
 
 | Que se valida | Como |

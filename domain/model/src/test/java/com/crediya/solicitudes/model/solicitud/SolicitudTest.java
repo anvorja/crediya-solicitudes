@@ -135,4 +135,28 @@ class SolicitudTest {
         assertThat(tipo.getCode()).isEqualTo(TipoPrestamoNoValidoException.CODE);
         assertThat(tipo.getMessage()).contains("INEXISTENTE");
     }
+
+    @Test
+    @DisplayName("cambiarEstado: cuando la transicion es valida, devuelve otra solicitud con el nuevo estado y los demas datos iguales")
+    void cambiarEstado_transicionValida() {
+        var id = UUID.randomUUID();
+        var original = new Solicitud(id, MONTO, 24, "maria@example.com", EstadoSolicitud.PENDIENTE_REVISION, TipoPrestamoFixture.personal());
+
+        var aprobada = original.cambiarEstado(EstadoSolicitud.APROBADA);
+
+        assertThat(aprobada.estado()).isEqualTo(EstadoSolicitud.APROBADA);
+        assertThat(aprobada.id()).isEqualTo(id);
+        assertThat(aprobada.email()).isEqualTo("maria@example.com");
+        assertThat(original.estado()).isEqualTo(EstadoSolicitud.PENDIENTE_REVISION);
+    }
+
+    @Test
+    @DisplayName("cambiarEstado: cuando la transicion no esta permitida, falla")
+    void cambiarEstado_transicionInvalida() {
+        var aprobada = new Solicitud(UUID.randomUUID(), MONTO, 24, "maria@example.com", EstadoSolicitud.APROBADA, TipoPrestamoFixture.personal());
+
+        assertThatThrownBy(() -> aprobada.cambiarEstado(EstadoSolicitud.RECHAZADA))
+                .isInstanceOf(com.crediya.solicitudes.model.solicitud.exceptions.TransicionEstadoInvalidaException.class)
+                .hasMessageContaining("No se puede pasar");
+    }
 }

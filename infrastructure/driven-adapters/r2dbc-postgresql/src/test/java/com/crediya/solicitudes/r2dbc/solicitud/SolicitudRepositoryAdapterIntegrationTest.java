@@ -254,4 +254,37 @@ class SolicitudRepositoryAdapterIntegrationTest {
                 .verifyComplete();
         StepVerifier.create(tipos.buscarPorNombre("INEXISTENTE")).verifyComplete();
     }
+
+    @Test
+    @DisplayName("buscarPorId devuelve la solicitud con su tipo y vacio si no existe")
+    void buscarPorId() {
+        var guardada = solicitudes.guardar(nueva("maria@example.com")).block();
+
+        StepVerifier.create(solicitudes.buscarPorId(guardada.id()))
+                .assertNext(s -> {
+                    assertThat(s.id()).isEqualTo(guardada.id());
+                    assertThat(s.estado()).isEqualTo(EstadoSolicitud.PENDIENTE_REVISION);
+                    assertThat(s.tipoPrestamo().nombre()).isEqualTo("PERSONAL");
+                })
+                .verifyComplete();
+        StepVerifier.create(solicitudes.buscarPorId(java.util.UUID.randomUUID())).verifyComplete();
+    }
+
+    @Test
+    @DisplayName("actualizarEstado cambia el estado y refresca actualizado_en solo si el estado anterior coincide")
+    void actualizarEstado_optimista() {
+        var guardada = solicitudes.guardar(nueva("maria@example.com")).block();
+        var aprobada = guardada.cambiarEstado(EstadoSolicitud.APROBADA);
+
+        StepVerifier.create(solicitudes.actualizarEstado(aprobada, EstadoSolicitud.PENDIENTE_REVISION))
+                .expectNext(aprobada).verifyComplete();
+        StepVerifier.create(solicitudes.buscarPorId(guardada.id()))
+                .assertNext(s -> assertThat(s.estado()).isEqualTo(EstadoSolicitud.APROBADA)).verifyComplete();
+
+        // Un segundo intento con el estado anterior desactualizado no debe pisar nada
+        var rechazada = guardada.cambiarEstado(EstadoSolicitud.RECHAZADA);
+        StepVerifier.create(solicitudes.actualizarEstado(rechazada, EstadoSolicitud.PENDIENTE_REVISION)).verifyComplete();
+        StepVerifier.create(solicitudes.buscarPorId(guardada.id()))
+                .assertNext(s -> assertThat(s.estado()).isEqualTo(EstadoSolicitud.APROBADA)).verifyComplete();
+    }
 }
