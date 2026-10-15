@@ -6,6 +6,7 @@ import com.crediya.solicitudes.api.mapper.SolicitudRestMapperImpl;
 import com.crediya.solicitudes.api.validation.RequestValidator;
 import com.crediya.solicitudes.model.cliente.exceptions.ClienteNoEncontradoException;
 import com.crediya.solicitudes.model.cliente.exceptions.ServicioNoDisponibleException;
+import com.crediya.solicitudes.model.common.exceptions.AccesoDenegadoException;
 import com.crediya.solicitudes.model.solicitud.EstadoSolicitud;
 import com.crediya.solicitudes.model.solicitud.Solicitud;
 import com.crediya.solicitudes.model.solicitud.commands.CrearSolicitudCommand;
@@ -228,5 +229,15 @@ class SolicitudRouterTest {
         client.get().uri("/api/v1/no-existe").exchange()
                 .expectStatus().isNotFound()
                 .expectBody().jsonPath("$.codigo").isEqualTo("PETICION_INVALIDA");
+    }
+
+    @Test
+    @DisplayName("cuando el dominio deniega el acceso, debe responder 403 con el codigo del dominio")
+    void cuandoDominioDeniegaAcceso_debeResponder403() {
+        when(useCase.ejecutar(any())).thenReturn(Mono.error(new AccesoDenegadoException()));
+
+        post(CUERPO_VALIDO)
+                .expectStatus().isForbidden()
+                .expectBody().jsonPath("$.codigo").isEqualTo("ACCESO_DENEGADO");
     }
 }

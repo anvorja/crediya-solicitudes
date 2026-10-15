@@ -4,6 +4,10 @@ import com.crediya.solicitudes.model.cliente.Cliente;
 import com.crediya.solicitudes.model.cliente.exceptions.ClienteNoEncontradoException;
 import com.crediya.solicitudes.model.cliente.gateways.ClienteGateway;
 import com.crediya.solicitudes.model.common.gateways.TransaccionGateway;
+import com.crediya.solicitudes.model.common.exceptions.AccesoDenegadoException;
+import com.crediya.solicitudes.model.seguridad.Rol;
+import com.crediya.solicitudes.model.seguridad.UsuarioAutenticado;
+import com.crediya.solicitudes.model.seguridad.gateways.ContextoSeguridadGateway;
 import com.crediya.solicitudes.model.solicitud.EstadoSolicitud;
 import com.crediya.solicitudes.model.solicitud.Solicitud;
 import com.crediya.solicitudes.model.solicitud.commands.CrearSolicitudCommand;
@@ -18,6 +22,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
@@ -53,12 +58,24 @@ class CrearSolicitudUseCaseTest {
     private SolicitudRepository solicitudRepository;
     @Mock
     private TransaccionGateway transaccionGateway;
+    @Mock
+    private ContextoSeguridadGateway contextoSeguridad;
 
     private CrearSolicitudUseCase useCase;
 
     @BeforeEach
     void setUp() {
-        useCase = new CrearSolicitudUseCase(clienteGateway, tipoPrestamoRepository, solicitudRepository, transaccionGateway);
+        useCase = new CrearSolicitudUseCase(clienteGateway, tipoPrestamoRepository, solicitudRepository, transaccionGateway,
+                contextoSeguridad);
+    }
+
+    private void actuaComo(Rol rol, String documento) {
+        when(contextoSeguridad.usuarioActual()).thenReturn(Mono.just(
+                new UsuarioAutenticado(UUID.randomUUID(), documento, "actor@crediya.co", rol)));
+    }
+
+    private void actuaComoElCliente() {
+        actuaComo(Rol.CLIENTE, "1020304050");
     }
 
     private void transaccionDejaPasar() {
@@ -72,6 +89,7 @@ class CrearSolicitudUseCaseTest {
     @Test
     @DisplayName("cuando el cliente y el tipo existen, debe guardar una solicitud Pendiente de revision con el email del cliente")
     void cuandoTodoValido_debeGuardarPendienteDeRevision() {
+        actuaComoElCliente();
         transaccionDejaPasar();
         var id = UUID.randomUUID();
         when(clienteGateway.buscarPorDocumento("1020304050")).thenReturn(Mono.just(CLIENTE));
@@ -96,6 +114,7 @@ class CrearSolicitudUseCaseTest {
     @Test
     @DisplayName("cuando el cliente no existe, debe fallar con ClienteNoEncontradoException y no guardar")
     void cuandoClienteNoExiste_debeFallarSinGuardar() {
+        actuaComoElCliente();
         transaccionDejaPasar();
         when(clienteGateway.buscarPorDocumento("1020304050")).thenReturn(Mono.empty());
         when(tipoPrestamoRepository.buscarPorNombre("PERSONAL")).thenReturn(Mono.just(PERSONAL));
@@ -110,6 +129,7 @@ class CrearSolicitudUseCaseTest {
     @Test
     @DisplayName("cuando el tipo de prestamo no existe, debe fallar con TipoPrestamoNoValidoException y no guardar")
     void cuandoTipoNoExiste_debeFallarSinGuardar() {
+        actuaComoElCliente();
         transaccionDejaPasar();
         when(clienteGateway.buscarPorDocumento("1020304050")).thenReturn(Mono.just(CLIENTE));
         when(tipoPrestamoRepository.buscarPorNombre("INEXISTENTE")).thenReturn(Mono.empty());
@@ -126,6 +146,7 @@ class CrearSolicitudUseCaseTest {
     @Test
     @DisplayName("cuando el monto esta fuera del rango del tipo, debe fallar con MontoFueraDeRangoException y no guardar")
     void cuandoMontoFueraDeRango_debeFallarSinGuardar() {
+        actuaComoElCliente();
         transaccionDejaPasar();
         when(clienteGateway.buscarPorDocumento("1020304050")).thenReturn(Mono.just(CLIENTE));
         when(tipoPrestamoRepository.buscarPorNombre("PERSONAL")).thenReturn(Mono.just(PERSONAL));
@@ -180,6 +201,7 @@ class CrearSolicitudUseCaseTest {
     @Test
     @DisplayName("cuando el repositorio falla al guardar, debe propagar el error")
     void cuandoGuardarFalla_debePropagarError() {
+        actuaComoElCliente();
         transaccionDejaPasar();
         when(clienteGateway.buscarPorDocumento("1020304050")).thenReturn(Mono.just(CLIENTE));
         when(tipoPrestamoRepository.buscarPorNombre("PERSONAL")).thenReturn(Mono.just(PERSONAL));
@@ -188,5 +210,45 @@ class CrearSolicitudUseCaseTest {
         StepVerifier.create(useCase.ejecutar(comando("1020304050", "5000000", 24, "PERSONAL")))
                 .expectErrorMessage("db caida")
                 .verify();
+    }
+
+    @Test
+    @DisplayName("cuando el cliente crea la solicitud a nombre de otra persona, debe denegar sin consultar ningun puerto")
+    void cuandoSolicitudAjena_debeDenegar() {
+        actuaComo(Rol.CLIENTE, "1111111111");
+        transaccionDejaPasar();
+
+        StepVerifier.create(useCase.ejecutar(comando("1020304050", "5000000", 24, "PERSONAL")))
+                .expectError(AccesoDenegadoException.class)
+                .verify();
+
+        verifyNoInteractions(clienteGateway, tipoPrestamoRepository, solicitudRepository);
+    }
+
+    @ParameterizedTest(name = "actor {0}")
+    @EnumSource(value = Rol.class, names = {"ADMIN", "ASESOR"})
+    @DisplayName("cuando quien llama no es un CLIENTE, debe denegar aunque el documento coincida")
+    void cuandoActorNoEsCliente_debeDenegar(Rol rol) {
+        actuaComo(rol, "1020304050");
+        transaccionDejaPasar();
+
+        StepVerifier.create(useCase.ejecutar(comando("1020304050", "5000000", 24, "PERSONAL")))
+                .expectError(AccesoDenegadoException.class)
+                .verify();
+
+        verifyNoInteractions(clienteGateway, tipoPrestamoRepository, solicitudRepository);
+    }
+
+    @Test
+    @DisplayName("cuando no hay usuario autenticado, debe denegar")
+    void cuandoSinUsuarioAutenticado_debeDenegar() {
+        when(contextoSeguridad.usuarioActual()).thenReturn(Mono.empty());
+        transaccionDejaPasar();
+
+        StepVerifier.create(useCase.ejecutar(comando("1020304050", "5000000", 24, "PERSONAL")))
+                .expectError(AccesoDenegadoException.class)
+                .verify();
+
+        verifyNoInteractions(clienteGateway, tipoPrestamoRepository, solicitudRepository);
     }
 }

@@ -36,6 +36,13 @@ adapter:
     max-retries: 2
     retry-backoff-ms: 100
 
+# Validacion de tokens: solo la clave publica de AUTENTICACION (JWKS); no hay secretos compartidos
+security:
+  jwt:
+    jwk-set-uri: ${AUTH_JWKS_URI:http://localhost:8081/.well-known/jwks.json}
+    issuer: ${JWT_ISSUER:crediya-auth}
+    audience: ${JWT_AUDIENCE:crediya}
+
 resilience4j:
   circuitbreaker:
     instances:

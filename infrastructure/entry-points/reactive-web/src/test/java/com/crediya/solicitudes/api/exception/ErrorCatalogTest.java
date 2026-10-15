@@ -1,6 +1,7 @@
 package com.crediya.solicitudes.api.exception;
 
 import com.crediya.solicitudes.model.cliente.exceptions.ClienteNoEncontradoException;
+import com.crediya.solicitudes.model.common.exceptions.AccesoDenegadoException;
 import com.crediya.solicitudes.model.cliente.exceptions.ServicioNoDisponibleException;
 import com.crediya.solicitudes.model.solicitud.exceptions.DatosSolicitudInvalidosException;
 import com.crediya.solicitudes.model.solicitud.exceptions.MontoFueraDeRangoException;
@@ -22,6 +23,7 @@ class ErrorCatalogTest {
         assertThat(ErrorCatalog.estadoDe(TipoPrestamoNoValidoException.CODE)).isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(ErrorCatalog.estadoDe(ClienteNoEncontradoException.CODE)).isEqualTo(HttpStatus.NOT_FOUND);
         assertThat(ErrorCatalog.estadoDe(ServicioNoDisponibleException.CODE)).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(ErrorCatalog.estadoDe(AccesoDenegadoException.CODE)).isEqualTo(HttpStatus.FORBIDDEN);
     }
 
     @Test
