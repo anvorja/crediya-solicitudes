@@ -9,6 +9,11 @@ allprojects {
     }
 }
 
+ext {
+    domainModules = [':model', ':usecase']
+    reactorBomVersion = '2024.0.8'
+}
+
 subprojects {
     apply plugin: 'java'
     apply plugin: 'jacoco'
@@ -41,10 +46,19 @@ subprojects {
         annotationProcessor  "org.projectlombok:lombok:${lombokVersion}"
         testCompileOnly  "org.projectlombok:lombok:${lombokVersion}"
         testAnnotationProcessor  "org.projectlombok:lombok:${lombokVersion}"
-        implementation platform("org.springframework.boot:spring-boot-dependencies:${springBootVersion}")
+        if (project.path in domainModules) {
+            // Enunciado: el dominio NO debe tener spring-boot-dependencies. Reactor se versiona con su propio BOM
+            // y el BOM de Spring solo se usa para resolver versiones de las dependencias de prueba.
+            implementation platform("io.projectreactor:reactor-bom:${reactorBomVersion}")
+            testImplementation platform("org.springframework.boot:spring-boot-dependencies:${springBootVersion}")
+        } else {
+            implementation platform("org.springframework.boot:spring-boot-dependencies:${springBootVersion}")
+        }
     }
 
     tasks.withType(Test).configureEach {
+        // Testcontainers 1.21.x usa por defecto la API 1.32 de Docker, que Docker Engine 29+ ya no acepta (minimo 1.40)
+        systemProperty 'api.version', providers.gradleProperty('dockerApiVersion').getOrElse('1.44')
         if (JavaVersion.current().isCompatibleWith(JavaVersion.VERSION_13)) {
             jvmArgs += [
                     "-XX:+AllowRedefinitionToAddDeleteMethods"
@@ -73,7 +87,10 @@ subprojects {
     }
 
     jacocoTestReport {
-        dependsOn test, 'pitest'
+        dependsOn test
+        if (project.hasProperty('runPitest')) {
+            dependsOn 'pitest'
+        }
 
         afterEvaluate {
             classDirectories.setFrom(files(classDirectories.files.collect {
@@ -101,7 +118,10 @@ jacoco {
 }
 
 tasks.register('jacocoMergedReport', JacocoReport) {
-    dependsOn = [test, subprojects.jacocoTestReport, pitestReportAggregate]
+    dependsOn = [test, subprojects.jacocoTestReport]
+    if (project.hasProperty('runPitest')) {
+        dependsOn pitestReportAggregate
+    }
     additionalSourceDirs.setFrom files(subprojects.sourceSets.main.allSource.srcDirs)
     sourceDirectories.setFrom files(subprojects.sourceSets.main.allSource.srcDirs)
     classDirectories.setFrom files(subprojects.sourceSets.main.output)
@@ -141,4 +161,28 @@ pitestReportAggregate {
 
 tasks.named('wrapper') {
     gradleVersion = '8.14.3'
+}
+
+// Enunciado: cobertura minima del 90% en dominio (model y usecase). Se valida con ./gradlew check
+configure(subprojects.findAll { it.path in domainModules }) {
+    tasks.named('jacocoTestCoverageVerification') {
+        dependsOn tasks.named('test')
+        violationRules {
+            rule {
+                limit {
+                    counter = 'LINE'
+                    value = 'COVEREDRATIO'
+                    minimum = 0.90
+                }
+                limit {
+                    counter = 'BRANCH'
+                    value = 'COVEREDRATIO'
+                    minimum = 0.90
+                }
+            }
+        }
+    }
+    tasks.named('check') {
+        dependsOn tasks.named('jacocoTestCoverageVerification')
+    }
 }

@@ -1,16 +1,15 @@
-// infrastructure/driven-adapters/r2dbc-postgresql/build.gradle
 dependencies {
     implementation project(':model')
     implementation 'org.springframework:spring-context'
     implementation 'org.springframework.boot:spring-boot-starter-data-r2dbc'
     implementation 'org.postgresql:r2dbc-postgresql'
-    implementation 'org.reactivecommons.utils:object-mapper-api:0.1.0'
     implementation 'io.r2dbc:r2dbc-pool'
 
-    implementation 'org.flywaydb:flyway-core:10.19.0'
-    implementation 'org.flywaydb:flyway-database-postgresql:10.19.0'
-    runtimeOnly 'org.postgresql:postgresql:42.7.7'
+    // Migraciones: Flyway necesita JDBC, solo se usa al arrancar; el acceso a datos es 100% R2DBC
+    implementation 'org.flywaydb:flyway-core'
+    implementation 'org.flywaydb:flyway-database-postgresql'
+    runtimeOnly 'org.postgresql:postgresql'
 
-    testImplementation 'org.reactivecommons.utils:object-mapper:0.1.0'
+    testImplementation 'org.testcontainers:postgresql'
+    testImplementation 'org.testcontainers:junit-jupiter'
 }
-

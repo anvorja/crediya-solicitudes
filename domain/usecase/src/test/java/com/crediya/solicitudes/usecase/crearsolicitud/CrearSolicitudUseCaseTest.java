@@ -1,325 +1,192 @@
-// domain/usecase/src/test/java/com/crediya/solicitudes/usecase/crearsolicitud/CrearSolicitudUseCaseTest.java
 package com.crediya.solicitudes.usecase.crearsolicitud;
 
-import com.crediya.solicitudes.model.solicitud.Solicitud;
+import com.crediya.solicitudes.model.cliente.Cliente;
+import com.crediya.solicitudes.model.cliente.exceptions.ClienteNoEncontradoException;
+import com.crediya.solicitudes.model.cliente.gateways.ClienteGateway;
+import com.crediya.solicitudes.model.common.gateways.TransaccionGateway;
 import com.crediya.solicitudes.model.solicitud.EstadoSolicitud;
-import com.crediya.solicitudes.model.solicitud.exception.DatosSolicitudInvalidosException;
-import com.crediya.solicitudes.model.solicitud.exception.SolicitudDuplicadaException;
-import com.crediya.solicitudes.model.solicitud.exception.TipoPrestamoNoValidoException;
+import com.crediya.solicitudes.model.solicitud.Solicitud;
+import com.crediya.solicitudes.model.solicitud.commands.CrearSolicitudCommand;
+import com.crediya.solicitudes.model.solicitud.exceptions.DatosSolicitudInvalidosException;
+import com.crediya.solicitudes.model.solicitud.exceptions.MontoFueraDeRangoException;
+import com.crediya.solicitudes.model.solicitud.exceptions.TipoPrestamoNoValidoException;
 import com.crediya.solicitudes.model.solicitud.gateways.SolicitudRepository;
+import com.crediya.solicitudes.model.tipoprestamo.TipoPrestamo;
+import com.crediya.solicitudes.model.tipoprestamo.gateways.TipoPrestamoRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
 import java.math.BigDecimal;
+import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
-/**
- * Tests unitarios reactivos para CrearSolicitudUseCase (HU2)
- * CUMPLE: 90% cobertura en dominio usando StepVerifier
- */
 @ExtendWith(MockitoExtension.class)
-@DisplayName("CrearSolicitudUseCase - Tests Reactivos HU2")
+@DisplayName("CrearSolicitudUseCase (HU2)")
 class CrearSolicitudUseCaseTest {
 
+    private static final Cliente CLIENTE = new Cliente("1020304050", "Maria", "Gomez", "maria@example.com",
+            new BigDecimal("4500000"));
+    private static final TipoPrestamo PERSONAL = new TipoPrestamo(1L, "PERSONAL", new BigDecimal("500000"),
+            new BigDecimal("50000000"), new BigDecimal("0.018"), true);
+
+    @Mock
+    private ClienteGateway clienteGateway;
+    @Mock
+    private TipoPrestamoRepository tipoPrestamoRepository;
     @Mock
     private SolicitudRepository solicitudRepository;
+    @Mock
+    private TransaccionGateway transaccionGateway;
 
     private CrearSolicitudUseCase useCase;
 
     @BeforeEach
     void setUp() {
-        useCase = new CrearSolicitudUseCase(solicitudRepository);
+        useCase = new CrearSolicitudUseCase(clienteGateway, tipoPrestamoRepository, solicitudRepository, transaccionGateway);
     }
 
-    @Nested
-    @DisplayName("Criterios de Aceptación - HU2")
-    class CriteriosAceptacionHU2 {
-
-        @Test
-        @DisplayName("CA-1: Debe registrar solicitud con datos completos del cliente y préstamo")
-        void debeRegistrarSolicitudConDatosCompletos() {
-            // Given
-            Solicitud solicitud = crearSolicitudValida();
-            Solicitud solicitudGuardada = crearSolicitudValidaConId();
-
-            when(solicitudRepository.existeSolicitudActivaPorDocumento(anyString()))
-                    .thenReturn(Mono.just(false));
-            when(solicitudRepository.guardar(any(Solicitud.class)))
-                    .thenReturn(Mono.just(solicitudGuardada));
-
-            // When & Then
-            StepVerifier.create(useCase.ejecutar(solicitud))
-                    .expectNextMatches(resultado ->
-                            resultado.getId() != null &&
-                                    resultado.getNumeroDocumento().equals("12345678") &&
-                                    resultado.getNombres().equals("Juan") &&
-                                    resultado.getApellidos().equals("Pérez") &&
-                                    resultado.getMontoSolicitado().compareTo(new BigDecimal("5000000")) == 0 &&
-                                    resultado.getTipoCredito().equals("PERSONAL")
-                    )
-                    .verifyComplete();
-
-            verify(solicitudRepository).guardar(any(Solicitud.class));
-        }
-
-        @Test
-        @DisplayName("CA-2: Debe asignar estado inicial 'PENDIENTE_REVISION' automáticamente")
-        void debeAsignarEstadoPendienteRevision() {
-            // Given
-            Solicitud solicitud = crearSolicitudValida();
-            Solicitud solicitudGuardada = crearSolicitudValidaConId();
-
-            when(solicitudRepository.existeSolicitudActivaPorDocumento(anyString()))
-                    .thenReturn(Mono.just(false));
-            when(solicitudRepository.guardar(any(Solicitud.class)))
-                    .thenReturn(Mono.just(solicitudGuardada));
-
-            // When & Then
-            StepVerifier.create(useCase.ejecutar(solicitud))
-                    .expectNextMatches(resultado ->
-                            resultado.getEstado() == EstadoSolicitud.PENDIENTE_REVISION &&
-                                    resultado.getFechaCreacion() != null &&
-                                    resultado.getFechaActualizacion() != null
-                    )
-                    .verifyComplete();
-        }
-
-        @Test
-        @DisplayName("CA-3: Debe validar tipos de préstamo válidos")
-        void debeValidarTiposPrestamoValidos() {
-            // Given - Tipos válidos según BusinessConstants
-            String[] tiposValidos = {"PERSONAL", "VEHICULO", "VIVIENDA", "EDUCATIVO"};
-
-            for (String tipoValido : tiposValidos) {
-                Solicitud solicitud = crearSolicitudValida();
-                solicitud.setTipoCredito(tipoValido);
-                Solicitud solicitudGuardada = crearSolicitudValidaConId();
-
-                when(solicitudRepository.existeSolicitudActivaPorDocumento(anyString()))
-                        .thenReturn(Mono.just(false));
-                when(solicitudRepository.guardar(any(Solicitud.class)))
-                        .thenReturn(Mono.just(solicitudGuardada));
-
-                // When & Then - No debe lanzar excepción
-                StepVerifier.create(useCase.ejecutar(solicitud))
-                        .expectNextCount(1)
-                        .verifyComplete();
-            }
-        }
-
-        @Test
-        @DisplayName("CA-3: Debe rechazar tipos de préstamo inválidos")
-        void debeRechazarTipoPrestamoInvalido() {
-            // Given
-            Solicitud solicitud = crearSolicitudValida();
-            solicitud.setTipoCredito("TIPO_INVALIDO");
-
-            // NO necesitamos mocks porque el error ocurre antes de las validaciones asíncronas
-
-            // When & Then
-            StepVerifier.create(useCase.ejecutar(solicitud))
-                    .expectError(TipoPrestamoNoValidoException.class)
-                    .verify();
-        }
+    private void transaccionDejaPasar() {
+        when(transaccionGateway.ejecutar(any())).thenAnswer(invocacion -> invocacion.getArgument(0));
     }
 
-    @Nested
-    @DisplayName("Validaciones de Datos Básicos")
-    class ValidacionesDatosBasicos {
-
-        @Test
-        @DisplayName("Debe fallar con documento vacío")
-        void deberiaFallarConDocumentoVacio() {
-            // Given
-            Solicitud solicitud = crearSolicitudValida();
-            solicitud.setNumeroDocumento("");
-
-            // When & Then
-            StepVerifier.create(useCase.ejecutar(solicitud))
-                    .expectError(DatosSolicitudInvalidosException.class)
-                    .verify();
-        }
-
-        @Test
-        @DisplayName("Debe fallar con nombres vacíos")
-        void deberiaFallarConNombresVacios() {
-            // Given
-            Solicitud solicitud = crearSolicitudValida();
-            solicitud.setNombres(null);
-
-            // When & Then
-            StepVerifier.create(useCase.ejecutar(solicitud))
-                    .expectError(DatosSolicitudInvalidosException.class)
-                    .verify();
-        }
-
-        @Test
-        @DisplayName("Debe fallar con apellidos vacíos")
-        void deberiaFallarConApellidosVacios() {
-            // Given
-            Solicitud solicitud = crearSolicitudValida();
-            solicitud.setApellidos("   ");
-
-            // When & Then
-            StepVerifier.create(useCase.ejecutar(solicitud))
-                    .expectError(DatosSolicitudInvalidosException.class)
-                    .verify();
-        }
-
-        @Test
-        @DisplayName("Debe fallar con email vacío")
-        void deberiaFallarConEmailVacio() {
-            // Given
-            Solicitud solicitud = crearSolicitudValida();
-            solicitud.setEmail(null);
-
-            // When & Then
-            StepVerifier.create(useCase.ejecutar(solicitud))
-                    .expectError(DatosSolicitudInvalidosException.class)
-                    .verify();
-        }
-
-        @Test
-        @DisplayName("Debe fallar con monto inválido")
-        void deberiaFallarConMontoInvalido() {
-            // Given
-            Solicitud solicitud = crearSolicitudValida();
-            solicitud.setMontoSolicitado(BigDecimal.ZERO);
-
-            // When & Then
-            StepVerifier.create(useCase.ejecutar(solicitud))
-                    .expectError(DatosSolicitudInvalidosException.class)
-                    .verify();
-        }
+    private static CrearSolicitudCommand comando(String documento, String monto, Integer plazo, String tipo) {
+        return new CrearSolicitudCommand(documento, monto == null ? null : new BigDecimal(monto), plazo, tipo);
     }
 
-    @Nested
-    @DisplayName("Validación de Solicitudes Duplicadas")
-    class ValidacionSolicitudesDuplicadas {
+    @Test
+    @DisplayName("cuando el cliente y el tipo existen, debe guardar una solicitud Pendiente de revision con el email del cliente")
+    void cuandoTodoValido_debeGuardarPendienteDeRevision() {
+        transaccionDejaPasar();
+        var id = UUID.randomUUID();
+        when(clienteGateway.buscarPorDocumento("1020304050")).thenReturn(Mono.just(CLIENTE));
+        when(tipoPrestamoRepository.buscarPorNombre("PERSONAL")).thenReturn(Mono.just(PERSONAL));
+        when(solicitudRepository.guardar(any())).thenAnswer(inv -> Mono.just(((Solicitud) inv.getArgument(0)).conId(id)));
 
-        @Test
-        @DisplayName("Debe fallar cuando cliente ya tiene solicitud activa")
-        void deberiaFallarConSolicitudDuplicada() {
-            // Given
-            Solicitud solicitud = crearSolicitudValida();
+        StepVerifier.create(useCase.ejecutar(comando(" 1020304050 ", "5000000", 24, " PERSONAL ")))
+                .assertNext(solicitud -> {
+                    assertThat(solicitud.id()).isEqualTo(id);
+                    assertThat(solicitud.email()).isEqualTo("maria@example.com");
+                    assertThat(solicitud.estado()).isEqualTo(EstadoSolicitud.PENDIENTE_REVISION);
+                    assertThat(solicitud.tipoPrestamo()).isEqualTo(PERSONAL);
+                })
+                .verifyComplete();
 
-            when(solicitudRepository.existeSolicitudActivaPorDocumento("12345678"))
-                    .thenReturn(Mono.just(true)); // Cliente ya tiene solicitud
-
-            // When & Then
-            StepVerifier.create(useCase.ejecutar(solicitud))
-                    .expectError(SolicitudDuplicadaException.class)
-                    .verify();
-        }
-
-        @Test
-        @DisplayName("Debe procesar cuando cliente NO tiene solicitud activa")
-        void deberiaProcesarSinSolicitudDuplicada() {
-            // Given
-            Solicitud solicitud = crearSolicitudValida();
-            Solicitud solicitudGuardada = crearSolicitudValidaConId();
-
-            when(solicitudRepository.existeSolicitudActivaPorDocumento("12345678"))
-                    .thenReturn(Mono.just(false)); // NO tiene solicitud
-            when(solicitudRepository.guardar(any(Solicitud.class)))
-                    .thenReturn(Mono.just(solicitudGuardada));
-
-            // When & Then
-            StepVerifier.create(useCase.ejecutar(solicitud))
-                    .expectNextCount(1)
-                    .verifyComplete();
-        }
+        var capturada = ArgumentCaptor.forClass(Solicitud.class);
+        verify(solicitudRepository).guardar(capturada.capture());
+        assertThat(capturada.getValue().id()).isNull();
+        verify(transaccionGateway).ejecutar(any());
     }
 
-    @Nested
-    @DisplayName("Casos Límite")
-    class CasosLimite {
+    @Test
+    @DisplayName("cuando el cliente no existe, debe fallar con ClienteNoEncontradoException y no guardar")
+    void cuandoClienteNoExiste_debeFallarSinGuardar() {
+        transaccionDejaPasar();
+        when(clienteGateway.buscarPorDocumento("1020304050")).thenReturn(Mono.empty());
+        when(tipoPrestamoRepository.buscarPorNombre("PERSONAL")).thenReturn(Mono.just(PERSONAL));
 
-        @Test
-        @DisplayName("Debe procesar montos en límites permitidos")
-        void debeProcesarMontosEnLimitesPermitidos() {
-            // Given - Monto en el límite superior
-            Solicitud solicitud = crearSolicitudValida();
-            solicitud.setMontoSolicitado(new BigDecimal("50000000")); // 50M límite superior
+        StepVerifier.create(useCase.ejecutar(comando("1020304050", "5000000", 24, "PERSONAL")))
+                .expectError(ClienteNoEncontradoException.class)
+                .verify();
 
-            when(solicitudRepository.existeSolicitudActivaPorDocumento(anyString()))
-                    .thenReturn(Mono.just(false));
-            when(solicitudRepository.guardar(any(Solicitud.class)))
-                    .thenAnswer(invocation -> {
-                        Solicitud sol = invocation.getArgument(0);
-                        sol.setId("uuid-generado-123"); // Asegurar que tenga ID
-                        return Mono.just(sol);
-                    });
-
-            // When & Then
-            StepVerifier.create(useCase.ejecutar(solicitud))
-                    .expectNextMatches(resultado -> {
-                        // Debug para ver qué está recibiendo
-                        System.out.println("Resultado: " + resultado);
-                        System.out.println("Monto esperado: 50000000");
-                        System.out.println("Monto actual: " + resultado.getMontoSolicitado());
-
-                        return resultado.getMontoSolicitado() != null &&
-                                resultado.getMontoSolicitado().compareTo(new BigDecimal("50000000")) == 0;
-                    })
-                    .verifyComplete();
-        }
-
-        @Test
-        @DisplayName("Debe generar ID si no existe")
-        void debeGenerarIdSiNoExiste() {
-            // Given
-            Solicitud solicitud = crearSolicitudValida();
-            solicitud.setId(null); // Sin ID
-
-            when(solicitudRepository.existeSolicitudActivaPorDocumento(anyString()))
-                    .thenReturn(Mono.just(false));
-            when(solicitudRepository.guardar(any(Solicitud.class)))
-                    .thenAnswer(invocation -> {
-                        Solicitud sol = invocation.getArgument(0);
-                        return Mono.just(sol);
-                    });
-
-            // When & Then
-            StepVerifier.create(useCase.ejecutar(solicitud))
-                    .expectNextMatches(resultado -> resultado.getId() != null && !resultado.getId().isEmpty())
-                    .verifyComplete();
-        }
+        verify(solicitudRepository, never()).guardar(any());
     }
 
-    // ============================================
-    // MÉTODOS AUXILIARES PARA TESTS
-    // ============================================
+    @Test
+    @DisplayName("cuando el tipo de prestamo no existe, debe fallar con TipoPrestamoNoValidoException y no guardar")
+    void cuandoTipoNoExiste_debeFallarSinGuardar() {
+        transaccionDejaPasar();
+        when(clienteGateway.buscarPorDocumento("1020304050")).thenReturn(Mono.just(CLIENTE));
+        when(tipoPrestamoRepository.buscarPorNombre("INEXISTENTE")).thenReturn(Mono.empty());
 
-    private Solicitud crearSolicitudValida() {
-        Solicitud solicitud = new Solicitud();
-        solicitud.setNumeroDocumento("12345678");
-        solicitud.setNombres("Juan");
-        solicitud.setApellidos("Pérez");
-        solicitud.setEmail("juan.perez@email.com");
-        solicitud.setMontoSolicitado(new BigDecimal("5000000"));
-        solicitud.setPlazoMeses(24);
-        solicitud.setTipoCredito("PERSONAL");
-        return solicitud;
+        StepVerifier.create(useCase.ejecutar(comando("1020304050", "5000000", 24, "INEXISTENTE")))
+                .expectErrorSatisfies(error -> assertThat(error)
+                        .isInstanceOf(TipoPrestamoNoValidoException.class)
+                        .hasMessageContaining("INEXISTENTE"))
+                .verify();
+
+        verify(solicitudRepository, never()).guardar(any());
     }
 
-    private Solicitud crearSolicitudValidaConId() {
-        Solicitud solicitud = crearSolicitudValida();
-        solicitud.setId("uuid-generado-123");
-        solicitud.setEstado(EstadoSolicitud.PENDIENTE_REVISION);
-        solicitud.setFechaCreacion(java.time.LocalDateTime.now());
-        solicitud.setFechaActualizacion(java.time.LocalDateTime.now());
-        return solicitud;
+    @Test
+    @DisplayName("cuando el monto esta fuera del rango del tipo, debe fallar con MontoFueraDeRangoException y no guardar")
+    void cuandoMontoFueraDeRango_debeFallarSinGuardar() {
+        transaccionDejaPasar();
+        when(clienteGateway.buscarPorDocumento("1020304050")).thenReturn(Mono.just(CLIENTE));
+        when(tipoPrestamoRepository.buscarPorNombre("PERSONAL")).thenReturn(Mono.just(PERSONAL));
+
+        StepVerifier.create(useCase.ejecutar(comando("1020304050", "100", 24, "PERSONAL")))
+                .expectError(MontoFueraDeRangoException.class)
+                .verify();
+
+        verify(solicitudRepository, never()).guardar(any());
+    }
+
+    @Test
+    @DisplayName("cuando el documento viene vacio, debe fallar sin consultar ningun puerto")
+    void cuandoDocumentoVacio_debeFallarSinConsultar() {
+        transaccionDejaPasar();
+
+        StepVerifier.create(useCase.ejecutar(comando("  ", "5000000", 24, "PERSONAL")))
+                .expectErrorSatisfies(error -> assertThat(error).isInstanceOf(DatosSolicitudInvalidosException.class)
+                        .hasMessageContaining("documento_identidad"))
+                .verify();
+
+        verifyNoInteractions(clienteGateway, tipoPrestamoRepository, solicitudRepository);
+    }
+
+    @ParameterizedTest(name = "tipo = [{0}]")
+    @NullAndEmptySource
+    @ValueSource(strings = {"   "})
+    @DisplayName("cuando el tipo de prestamo viene nulo o vacio, debe fallar sin consultar ningun puerto")
+    void cuandoTipoVacio_debeFallarSinConsultar(String tipo) {
+        transaccionDejaPasar();
+
+        StepVerifier.create(useCase.ejecutar(comando("1020304050", "5000000", 24, tipo)))
+                .expectErrorSatisfies(error -> assertThat(error).isInstanceOf(DatosSolicitudInvalidosException.class)
+                        .hasMessageContaining("tipo_prestamo"))
+                .verify();
+
+        verifyNoInteractions(clienteGateway, tipoPrestamoRepository, solicitudRepository);
+    }
+
+    @Test
+    @DisplayName("cuando el documento es nulo, debe fallar sin consultar ningun puerto")
+    void cuandoDocumentoNulo_debeFallarSinConsultar() {
+        transaccionDejaPasar();
+
+        StepVerifier.create(useCase.ejecutar(comando(null, "5000000", 24, "PERSONAL")))
+                .expectError(DatosSolicitudInvalidosException.class)
+                .verify();
+
+        verifyNoInteractions(clienteGateway, tipoPrestamoRepository, solicitudRepository);
+    }
+
+    @Test
+    @DisplayName("cuando el repositorio falla al guardar, debe propagar el error")
+    void cuandoGuardarFalla_debePropagarError() {
+        transaccionDejaPasar();
+        when(clienteGateway.buscarPorDocumento("1020304050")).thenReturn(Mono.just(CLIENTE));
+        when(tipoPrestamoRepository.buscarPorNombre("PERSONAL")).thenReturn(Mono.just(PERSONAL));
+        when(solicitudRepository.guardar(any())).thenReturn(Mono.error(new IllegalStateException("db caida")));
+
+        StepVerifier.create(useCase.ejecutar(comando("1020304050", "5000000", 24, "PERSONAL")))
+                .expectErrorMessage("db caida")
+                .verify();
     }
 }

@@ -1,16 +1,20 @@
 package com.crediya.solicitudes.api.dto.response;
 
-import lombok.Builder;
-import lombok.Data;
-import java.time.LocalDateTime;
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.databind.PropertyNamingStrategies;
+import com.fasterxml.jackson.databind.annotation.JsonNaming;
+
+import java.time.Instant;
 import java.util.Map;
 
-@Data
-@Builder
-public class ErrorResponse {
-    private LocalDateTime timestamp;
-    private int status;
-    private String error;
-    private String message;
-    private Map<String, String> details;
+@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+@JsonInclude(JsonInclude.Include.NON_NULL)
+public record ErrorResponse(
+        String codigo,
+        String mensaje,
+        int estado,
+        Instant marcaTiempo,
+        String ruta,
+        Map<String, String> detalles
+) {
 }

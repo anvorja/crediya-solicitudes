@@ -38,3 +38,10 @@ sonar {
 }
 
 apply from: './main.gradle'
+
+// El BOM de Reactor es la unica plataforma permitida en el dominio (el enunciado prohibe spring-boot-dependencies ahi)
+cleanPlugin {
+    modelProps {
+        whitelistedDependencies = 'reactor-bom'
+    }
+}

@@ -1,123 +1,71 @@
-// domain/usecase/src/main/java/com/crediya/solicitudes/usecase/crearsolicitud/CrearSolicitudUseCase.java
 package com.crediya.solicitudes.usecase.crearsolicitud;
 
+import com.crediya.solicitudes.model.cliente.Cliente;
+import com.crediya.solicitudes.model.cliente.exceptions.ClienteNoEncontradoException;
+import com.crediya.solicitudes.model.cliente.gateways.ClienteGateway;
+import com.crediya.solicitudes.model.common.gateways.TransaccionGateway;
 import com.crediya.solicitudes.model.solicitud.Solicitud;
-import com.crediya.solicitudes.model.solicitud.EstadoSolicitud;
-import com.crediya.solicitudes.model.solicitud.exception.DatosSolicitudInvalidosException;
-import com.crediya.solicitudes.model.solicitud.exception.SolicitudDuplicadaException;
-import com.crediya.solicitudes.model.solicitud.exception.TipoPrestamoNoValidoException;
+import com.crediya.solicitudes.model.solicitud.commands.CrearSolicitudCommand;
+import com.crediya.solicitudes.model.solicitud.exceptions.DatosSolicitudInvalidosException;
+import com.crediya.solicitudes.model.solicitud.exceptions.TipoPrestamoNoValidoException;
 import com.crediya.solicitudes.model.solicitud.gateways.SolicitudRepository;
-import lombok.RequiredArgsConstructor;
+import com.crediya.solicitudes.model.tipoprestamo.TipoPrestamo;
+import com.crediya.solicitudes.model.tipoprestamo.gateways.TipoPrestamoRepository;
 import reactor.core.publisher.Mono;
 
-import java.time.LocalDateTime;
-
 /**
- * Use Case para crear solicitudes de préstamo (HU2)
- * Implementa validaciones de negocio y flujo reactivo completo
- * CUMPLE: Campos final para concurrencia segura (Rule_2.5)
+ * HU2: registra una solicitud de prestamo verificando al cliente y el tipo de prestamo.
  */
-@RequiredArgsConstructor
 public class CrearSolicitudUseCase {
 
-    // ✅ CORRECTO: Campo final para evitar concurrencia (ArchUnit Rule_2.5)
+    private final ClienteGateway clienteGateway;
+    private final TipoPrestamoRepository tipoPrestamoRepository;
     private final SolicitudRepository solicitudRepository;
+    private final TransaccionGateway transaccionGateway;
 
-    /**
-     * Ejecuta el caso de uso de creación de solicitud
-     * HU2: Como cliente, quiero enviar mi solicitud de préstamo
-     * FLUJO REACTIVO: Usa operadores reactivos para mantener la cadena
-     */
-    public Mono<Solicitud> ejecutar(Solicitud solicitud) {
-        return Mono.just(solicitud)
-                .transform(this::validarDatosBasicos)
-                .transform(this::validarTipoPrestamo)
-                .transform(this::validarSolicitudDuplicada)
-                .transform(this::establecerEstadoInicial)
-                .flatMap(solicitudRepository::guardar);
+    public CrearSolicitudUseCase(ClienteGateway clienteGateway,
+                                 TipoPrestamoRepository tipoPrestamoRepository,
+                                 SolicitudRepository solicitudRepository,
+                                 TransaccionGateway transaccionGateway) {
+        this.clienteGateway = clienteGateway;
+        this.tipoPrestamoRepository = tipoPrestamoRepository;
+        this.solicitudRepository = solicitudRepository;
+        this.transaccionGateway = transaccionGateway;
     }
 
-    // ============================================
-    // MÉTODOS PRIVADOS DE VALIDACIÓN REACTIVA
-    // ============================================
-
-    /**
-     * Validación 1: Datos básicos obligatorios
-     * CUMPLE: filter + switchIfEmpty para validación reactiva
-     */
-    private Mono<Solicitud> validarDatosBasicos(Mono<Solicitud> solicitudMono) {
-        return solicitudMono
-                .filter(s -> s.getNumeroDocumento() != null && !s.getNumeroDocumento().trim().isEmpty())
-                .switchIfEmpty(Mono.error(new DatosSolicitudInvalidosException("Número de documento es obligatorio")))
-                .filter(s -> s.getNombres() != null && !s.getNombres().trim().isEmpty())
-                .switchIfEmpty(Mono.error(new DatosSolicitudInvalidosException("Nombres son obligatorios")))
-                .filter(s -> s.getApellidos() != null && !s.getApellidos().trim().isEmpty())
-                .switchIfEmpty(Mono.error(new DatosSolicitudInvalidosException("Apellidos son obligatorios")))
-                .filter(s -> s.getEmail() != null && !s.getEmail().trim().isEmpty())
-                .switchIfEmpty(Mono.error(new DatosSolicitudInvalidosException("Email es obligatorio")))
-                .filter(s -> s.getMontoSolicitado() != null && s.getMontoSolicitado().compareTo(java.math.BigDecimal.ZERO) > 0)
-                .switchIfEmpty(Mono.error(new DatosSolicitudInvalidosException("Monto solicitado debe ser mayor a cero")));
+    public Mono<Solicitud> ejecutar(CrearSolicitudCommand comando) {
+        return Mono.fromCallable(() -> exigirDatosBasicos(comando))
+                .flatMap(this::cargarContexto)
+                .map(contexto -> Solicitud.crear(contexto.cliente().email(), comando.monto(), comando.plazo(),
+                        contexto.tipoPrestamo()))
+                .flatMap(solicitudRepository::guardar)
+                .as(transaccionGateway::ejecutar);
     }
 
-    /**
-     * Validación 2: Tipo de préstamo válido
-     * CUMPLE: Criterio de aceptación - sistema valida tipos existentes
-     */
-    private Mono<Solicitud> validarTipoPrestamo(Mono<Solicitud> solicitudMono) {
-        return solicitudMono
-                .flatMap(solicitud -> {
-                    if (!esTipoPrestamoValido(solicitud.getTipoCredito())) {
-                        return Mono.error(new TipoPrestamoNoValidoException(
-                                "Tipo de crédito no válido: " + solicitud.getTipoCredito() +
-                                        ". Tipos permitidos: PERSONAL, VEHICULO, VIVIENDA, EDUCATIVO"));
-                    }
-                    return Mono.just(solicitud);
-                });
+    private Mono<Contexto> cargarContexto(CrearSolicitudCommand comando) {
+        return Mono.zip(buscarCliente(comando), buscarTipoPrestamo(comando), Contexto::new);
     }
 
-    /**
-     * Validación 3: No debe existir solicitud duplicada
-     * CUMPLE: Criterio de aceptación - cliente no puede tener solicitudes activas
-     */
-    private Mono<Solicitud> validarSolicitudDuplicada(Mono<Solicitud> solicitudMono) {
-        return solicitudMono
-                .flatMap(solicitud ->
-                        solicitudRepository.existeSolicitudActivaPorDocumento(solicitud.getNumeroDocumento())
-                                .flatMap(existe -> existe
-                                        ? Mono.error(new SolicitudDuplicadaException(
-                                        "Cliente ya tiene una solicitud activa con documento: " + solicitud.getNumeroDocumento()))
-                                        : Mono.just(solicitud))
-                );
+    private Mono<Cliente> buscarCliente(CrearSolicitudCommand comando) {
+        return clienteGateway.buscarPorDocumento(comando.documentoIdentidad().trim())
+                .switchIfEmpty(Mono.error(ClienteNoEncontradoException::new));
     }
 
-    /**
-     * Establecer estado inicial
-     * CUMPLE: Criterio de aceptación - estado inicial "Pendiente de revisión"
-     */
-    private Mono<Solicitud> establecerEstadoInicial(Mono<Solicitud> solicitudMono) {
-        return solicitudMono
-                .map(solicitud -> {
-                    solicitud.setEstado(EstadoSolicitud.PENDIENTE_REVISION);
-                    solicitud.setFechaCreacion(LocalDateTime.now());
-                    solicitud.setFechaActualizacion(LocalDateTime.now());
-                    // Generar ID si no existe
-                    if (solicitud.getId() == null || solicitud.getId().isEmpty()) {
-                        solicitud.setId(java.util.UUID.randomUUID().toString());
-                    }
-                    return solicitud;
-                });
+    private Mono<TipoPrestamo> buscarTipoPrestamo(CrearSolicitudCommand comando) {
+        return tipoPrestamoRepository.buscarPorNombre(comando.tipoPrestamo().trim())
+                .switchIfEmpty(Mono.error(() -> new TipoPrestamoNoValidoException(comando.tipoPrestamo().trim())));
     }
 
-    /**
-     * Valida si el tipo de préstamo es uno de los permitidos
-     * CUMPLE: Reglas de negocio específicas del dominio
-     */
-    private boolean esTipoPrestamoValido(String tipoCredito) {
-        if (tipoCredito == null || tipoCredito.trim().isEmpty()) {
-            return false;
+    private static CrearSolicitudCommand exigirDatosBasicos(CrearSolicitudCommand comando) {
+        if (comando.documentoIdentidad() == null || comando.documentoIdentidad().isBlank()) {
+            throw new DatosSolicitudInvalidosException("documento_identidad", "es obligatorio");
         }
+        if (comando.tipoPrestamo() == null || comando.tipoPrestamo().isBlank()) {
+            throw new DatosSolicitudInvalidosException("tipo_prestamo", "es obligatorio");
+        }
+        return comando;
+    }
 
-        return java.util.Set.of("PERSONAL", "VEHICULO", "VIVIENDA", "EDUCATIVO")
-                .contains(tipoCredito.toUpperCase().trim());
+    private record Contexto(Cliente cliente, TipoPrestamo tipoPrestamo) {
     }
 }
