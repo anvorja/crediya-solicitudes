@@ -9,6 +9,7 @@ import com.crediya.solicitudes.model.evento.gateways.EventoSalienteRepository;
 import com.crediya.solicitudes.model.evento.gateways.PublicadorDeEventos;
 import com.crediya.solicitudes.usecase.actualizarestado.ActualizarEstadoSolicitudUseCase;
 import com.crediya.solicitudes.usecase.crearsolicitud.CrearSolicitudUseCase;
+import com.crediya.solicitudes.usecase.procesardecision.ProcesarDecisionAutomaticaUseCase;
 import com.crediya.solicitudes.usecase.publicareventos.PublicarEventosPendientesUseCase;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -32,6 +33,7 @@ class UseCasesConfigTest {
             assertThat(contexto.getBeansOfType(CrearSolicitudUseCase.class)).hasSize(1);
             assertThat(contexto.getBeansOfType(ActualizarEstadoSolicitudUseCase.class)).hasSize(1);
             assertThat(contexto.getBeansOfType(PublicarEventosPendientesUseCase.class)).hasSize(1);
+            assertThat(contexto.getBeansOfType(ProcesarDecisionAutomaticaUseCase.class)).hasSize(1);
         }
     }
 

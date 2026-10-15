@@ -171,4 +171,31 @@ class EventoSalienteRepositoryAdapterIntegrationTest {
         // Con 2 filas bloqueadas por otra transaccion, SKIP LOCKED devuelve solo las 2 restantes
         assertThat(resultado.block()).hasSize(2);
     }
+
+    @Test
+    @DisplayName("el pedido de validacion automatica va a la cola de validacion con solicitud, solicitante y prestamos aprobados")
+    void validacionSolicitada_contrato() throws Exception {
+        var solicitud = new Solicitud(UUID.randomUUID(), new BigDecimal("5000000.00"), 24, "maria@example.com",
+                EstadoSolicitud.PENDIENTE_REVISION, PERSONAL);
+        var aprobado = new com.crediya.solicitudes.model.solicitud.PrestamoAprobado(new BigDecimal("2000000.00"), 12, new BigDecimal("0.022"));
+        outbox.registrar(new com.crediya.solicitudes.model.evento.ValidacionAutomaticaSolicitada(
+                Instant.parse("2026-10-15T10:00:00Z"), solicitud, "Maria Gomez", new BigDecimal("4500000"), List.of(aprobado))).block();
+
+        var guardado = outbox.tomarPendientes(1).blockFirst();
+
+        assertThat(guardado.destino()).isEqualTo(Destino.VALIDACION);
+        JsonNode json = JSON.readTree(guardado.payload());
+        assertThat(json.get("id_evento").asText()).isEqualTo(guardado.id().toString());
+        assertThat(json.get("tipo").asText()).isEqualTo("VALIDACION_AUTOMATICA_SOLICITADA");
+        assertThat(json.at("/solicitud/id_solicitud").asText()).isEqualTo(solicitud.id().toString());
+        assertThat(json.at("/solicitud/monto").decimalValue()).isEqualByComparingTo("5000000");
+        assertThat(json.at("/solicitud/plazo").asInt()).isEqualTo(24);
+        assertThat(json.at("/solicitud/tasa_interes").decimalValue()).isEqualByComparingTo("0.018");
+        assertThat(json.at("/solicitante/email").asText()).isEqualTo("maria@example.com");
+        assertThat(json.at("/solicitante/nombre").asText()).isEqualTo("Maria Gomez");
+        assertThat(json.at("/solicitante/salario_base").decimalValue()).isEqualByComparingTo("4500000");
+        assertThat(json.at("/prestamos_aprobados/0/monto").decimalValue()).isEqualByComparingTo("2000000");
+        assertThat(json.at("/prestamos_aprobados/0/plazo").asInt()).isEqualTo(12);
+        assertThat(json.at("/prestamos_aprobados/0/tasa_interes").decimalValue()).isEqualByComparingTo("0.022");
+    }
 }

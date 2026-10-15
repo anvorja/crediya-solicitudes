@@ -5,10 +5,13 @@ import com.crediya.solicitudes.model.cliente.exceptions.ClienteNoEncontradoExcep
 import com.crediya.solicitudes.model.cliente.gateways.ClienteGateway;
 import com.crediya.solicitudes.model.common.gateways.TransaccionGateway;
 import com.crediya.solicitudes.model.common.exceptions.AccesoDenegadoException;
+import com.crediya.solicitudes.model.evento.ValidacionAutomaticaSolicitada;
+import com.crediya.solicitudes.model.evento.gateways.EventoSalienteRepository;
 import com.crediya.solicitudes.model.seguridad.Rol;
 import com.crediya.solicitudes.model.seguridad.UsuarioAutenticado;
 import com.crediya.solicitudes.model.seguridad.gateways.ContextoSeguridadGateway;
 import com.crediya.solicitudes.model.solicitud.EstadoSolicitud;
+import com.crediya.solicitudes.model.solicitud.PrestamoAprobado;
 import com.crediya.solicitudes.model.solicitud.Solicitud;
 import com.crediya.solicitudes.model.solicitud.commands.CrearSolicitudCommand;
 import com.crediya.solicitudes.model.solicitud.exceptions.DatosSolicitudInvalidosException;
@@ -28,10 +31,15 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
 import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -50,6 +58,10 @@ class CrearSolicitudUseCaseTest {
     private static final TipoPrestamo PERSONAL = new TipoPrestamo(1L, "PERSONAL", new BigDecimal("500000"),
             new BigDecimal("50000000"), new BigDecimal("0.018"), true);
 
+    private static final Instant AHORA = Instant.parse("2026-10-15T10:00:00Z");
+    private static final TipoPrestamo VEHICULO = new TipoPrestamo(3L, "VEHICULO", new BigDecimal("10000000"),
+            new BigDecimal("200000000"), new BigDecimal("0.012"), false);
+
     @Mock
     private ClienteGateway clienteGateway;
     @Mock
@@ -60,13 +72,15 @@ class CrearSolicitudUseCaseTest {
     private TransaccionGateway transaccionGateway;
     @Mock
     private ContextoSeguridadGateway contextoSeguridad;
+    @Mock
+    private EventoSalienteRepository eventoSalienteRepository;
 
     private CrearSolicitudUseCase useCase;
 
     @BeforeEach
     void setUp() {
         useCase = new CrearSolicitudUseCase(clienteGateway, tipoPrestamoRepository, solicitudRepository, transaccionGateway,
-                contextoSeguridad);
+                contextoSeguridad, eventoSalienteRepository, Clock.fixed(AHORA, ZoneOffset.UTC));
     }
 
     private void actuaComo(Rol rol, String documento) {
@@ -95,6 +109,8 @@ class CrearSolicitudUseCaseTest {
         when(clienteGateway.buscarPorDocumento("1020304050")).thenReturn(Mono.just(CLIENTE));
         when(tipoPrestamoRepository.buscarPorNombre("PERSONAL")).thenReturn(Mono.just(PERSONAL));
         when(solicitudRepository.guardar(any())).thenAnswer(inv -> Mono.just(((Solicitud) inv.getArgument(0)).conId(id)));
+        when(solicitudRepository.buscarAprobadasPorEmails(List.of("maria@example.com"))).thenReturn(Flux.empty());
+        when(eventoSalienteRepository.registrar(any())).thenReturn(Mono.empty());
 
         StepVerifier.create(useCase.ejecutar(comando(" 1020304050 ", "5000000", 24, " PERSONAL ")))
                 .assertNext(solicitud -> {
@@ -250,5 +266,62 @@ class CrearSolicitudUseCaseTest {
                 .verify();
 
         verifyNoInteractions(clienteGateway, tipoPrestamoRepository, solicitudRepository);
+    }
+
+    @Test
+    @DisplayName("HU7: un tipo con validacion automatica registra, en la misma transaccion, el pedido de evaluacion con salario, nombre y prestamos aprobados")
+    void tipoAutomatico_registraPedidoDeValidacion() {
+        actuaComoElCliente();
+        transaccionDejaPasar();
+        var id = UUID.randomUUID();
+        var aprobada = new Solicitud(UUID.randomUUID(), new BigDecimal("2000000"), 12, "maria@example.com", EstadoSolicitud.APROBADA, PERSONAL);
+        when(clienteGateway.buscarPorDocumento("1020304050")).thenReturn(Mono.just(CLIENTE));
+        when(tipoPrestamoRepository.buscarPorNombre("PERSONAL")).thenReturn(Mono.just(PERSONAL));
+        when(solicitudRepository.guardar(any())).thenAnswer(inv -> Mono.just(((Solicitud) inv.getArgument(0)).conId(id)));
+        when(solicitudRepository.buscarAprobadasPorEmails(List.of("maria@example.com"))).thenReturn(Flux.just(aprobada));
+        when(eventoSalienteRepository.registrar(any())).thenReturn(Mono.empty());
+
+        StepVerifier.create(useCase.ejecutar(comando("1020304050", "5000000", 24, "PERSONAL")))
+                .expectNextCount(1).verifyComplete();
+
+        var evento = ArgumentCaptor.forClass(ValidacionAutomaticaSolicitada.class);
+        verify(eventoSalienteRepository).registrar(evento.capture());
+        assertThat(evento.getValue().solicitud().id()).isEqualTo(id);
+        assertThat(evento.getValue().nombreCliente()).isEqualTo("Maria Gomez");
+        assertThat(evento.getValue().salarioBase()).isEqualByComparingTo("4500000");
+        assertThat(evento.getValue().ocurridoEn()).isEqualTo(AHORA);
+        assertThat(evento.getValue().prestamosAprobados()).containsExactly(PrestamoAprobado.de(aprobada));
+        verify(transaccionGateway).ejecutar(any());
+    }
+
+    @Test
+    @DisplayName("HU7: un tipo sin validacion automatica queda Pendiente sin evento ni consulta de prestamos")
+    void tipoManual_noRegistraEvento() {
+        actuaComoElCliente();
+        transaccionDejaPasar();
+        when(clienteGateway.buscarPorDocumento("1020304050")).thenReturn(Mono.just(CLIENTE));
+        when(tipoPrestamoRepository.buscarPorNombre("VEHICULO")).thenReturn(Mono.just(VEHICULO));
+        when(solicitudRepository.guardar(any())).thenAnswer(inv -> Mono.just(((Solicitud) inv.getArgument(0)).conId(UUID.randomUUID())));
+
+        StepVerifier.create(useCase.ejecutar(comando("1020304050", "20000000", 48, "VEHICULO")))
+                .assertNext(s -> assertThat(s.estado()).isEqualTo(EstadoSolicitud.PENDIENTE_REVISION)).verifyComplete();
+
+        verifyNoInteractions(eventoSalienteRepository);
+        verify(solicitudRepository, never()).buscarAprobadasPorEmails(any());
+    }
+
+    @Test
+    @DisplayName("HU7: si no se puede registrar el pedido de evaluacion, el error se propaga para que la transaccion revierta la solicitud")
+    void falloAlRegistrarEvento_propagaError() {
+        actuaComoElCliente();
+        transaccionDejaPasar();
+        when(clienteGateway.buscarPorDocumento("1020304050")).thenReturn(Mono.just(CLIENTE));
+        when(tipoPrestamoRepository.buscarPorNombre("PERSONAL")).thenReturn(Mono.just(PERSONAL));
+        when(solicitudRepository.guardar(any())).thenAnswer(inv -> Mono.just(((Solicitud) inv.getArgument(0)).conId(UUID.randomUUID())));
+        when(solicitudRepository.buscarAprobadasPorEmails(any())).thenReturn(Flux.empty());
+        when(eventoSalienteRepository.registrar(any())).thenReturn(Mono.error(new IllegalStateException("bd caida")));
+
+        StepVerifier.create(useCase.ejecutar(comando("1020304050", "5000000", 24, "PERSONAL")))
+                .expectError(IllegalStateException.class).verify();
     }
 }
