@@ -211,6 +211,19 @@ Swagger UI: http://localhost:8080/swagger-ui.html - Health: http://localhost:808
 Notas de entorno: Testcontainers 1.21.x necesita `api.version=1.44` con Docker Engine 29+ (ya configurado en `main.gradle`;
 se puede cambiar con `-PdockerApiVersion=...`).
 
+## CI/CD (GitHub Actions)
+
+`.github/workflows/ci.yml` corre en cada PR y en cada push a `develop` o `main`. Sus tres jobs se llaman exactamente como los exigen las
+rulesets de la rama (no los renombres sin actualizar la ruleset):
+
+| Job (check requerido) | Que valida |
+|-----------------------|------------|
+| **Lint** | `hadolint` sobre el Dockerfile, `shellcheck` sobre los scripts, `docker compose config` y `validateStructure` (el dominio no depende de infraestructura) |
+| **Calidad y build** | `./gradlew build jacocoMergedReport`: compila, corre las pruebas unitarias y de integracion (Testcontainers) y exige 90% de cobertura en el dominio; publica los reportes como artefacto y la cobertura en el resumen del job |
+| **Imagen Docker** | Construye la imagen, comprueba que no corra como root y, solo al integrar en `develop`/`main`, la publica en `ghcr.io/<owner>/<repo>` (tags de rama, `sha-<corto>` y `latest` en `main`) |
+
+`develop` solo admite PR con *squash* y `main` solo con *merge*; ambas exigen los tres checks en verde.
+
 ## Flujo de trabajo (gitflow)
 
 `main` (estable) <- `develop` <- `feature/HU-XX-nombre` (una rama por HU, se integra a `develop` con `--no-ff`).
