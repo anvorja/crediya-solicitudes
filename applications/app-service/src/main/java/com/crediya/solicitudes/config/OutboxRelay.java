@@ -7,6 +7,7 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 import reactor.core.Disposable;
+import reactor.core.Disposables;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -24,7 +25,7 @@ public class OutboxRelay {
 
     private final PublicarEventosPendientesUseCase publicarEventosPendientes;
     private final OutboxProperties propiedades;
-    private Disposable suscripcion;
+    private final Disposable.Swap suscripcion = Disposables.swap();
 
     @EventListener(ApplicationReadyEvent.class)
     public void iniciar() {
@@ -33,7 +34,7 @@ public class OutboxRelay {
             return;
         }
         log.info("Relevo del outbox activo cada {} (lote de {})", propiedades.intervalo(), propiedades.lote());
-        suscripcion = Flux.interval(propiedades.intervalo())
+        suscripcion.update(Flux.interval(propiedades.intervalo())
                 .onBackpressureDrop()
                 .concatMap(tic -> publicarEventosPendientes.ejecutar(propiedades.lote())
                         .doOnNext(publicados -> {
@@ -45,13 +46,11 @@ public class OutboxRelay {
                             log.warn("Ronda del outbox fallida: {}", error.toString());
                             return Mono.empty();
                         }), 1)
-                .subscribe();
+                .subscribe());
     }
 
     @PreDestroy
     public void detener() {
-        if (suscripcion != null) {
-            suscripcion.dispose();
-        }
+        suscripcion.dispose();
     }
 }

@@ -53,7 +53,8 @@ class ClienteGatewayAdapterTest {
     }
 
     private ClienteGatewayAdapter adaptador() {
-        return adaptador(CircuitBreakerRegistry.ofDefaults(), 2000, 2);
+        // Holgado: la primera peticion paga el arranque en frio de Netty y en un runner de CI lento supera los 2 s
+        return adaptador(CircuitBreakerRegistry.ofDefaults(), 10_000, 2);
     }
 
     private static MockResponse json(int estado, String cuerpo) {
