@@ -13,7 +13,7 @@ Solicitudes de prestamo de la plataforma CrediYa. Arquitectura hexagonal / Clean
 | HU4 | Listado de solicitudes para revision manual (`GET /api/v1/solicitud`) | `feature/HU-04-listado-solicitudes` | Hecha |
 | HU5 | Contenerizacion con Docker y docker-compose | `feature/HU-05-contenerizacion` | Hecha |
 | HU6 | Aprobar o rechazar una solicitud (`PUT /api/v1/solicitud`) + notificacion | `feature/HU-06-aprobar-rechazar-solicitud` | Hecha |
-| HU7 | Validacion automatica (capacidad de endeudamiento) | `feature/HU-07-...` | Pendiente |
+| HU7 | Validacion automatica (capacidad de endeudamiento) | `feature/HU-07-validacion-automatica` | Hecha |
 
 ## Estructura
 
@@ -96,6 +96,34 @@ AWS: `adapter.sqs.*` se configura por variables de entorno (`AWS_REGION`, `AWS_E
 `SQS_NOTIFICACIONES_URL`). Las credenciales **no** estan en el codigo ni en `application.yaml`: el SDK las toma del rol de la tarea
 (ECS), de variables de entorno o de un perfil. Permiso necesario: `sqs:SendMessage` sobre la cola de notificaciones.
 
+## Validacion automatica de la capacidad de endeudamiento (HU7)
+
+Los tipos de prestamo con `validacion_automatica` (PERSONAL y LIBRE_INVERSION en el catalogo sembrado) no esperan a un asesor:
+
+1. Al crear la solicitud se guarda, **en la misma transaccion**, el evento `VALIDACION_AUTOMATICA_SOLICITADA` (outbox) con el salario y el
+   nombre del solicitante y sus prestamos aprobados. El relevo lo publica en `crediya-validacion-automatica`.
+2. La Lambda [`lambda-capacidad-endeudamiento`](../lambda-capacidad-endeudamiento) calcula (capacidad = 35% del salario, menos la deuda
+   vigente; aprobada si la cuota cabe; revision manual si ademas el monto supera 5 salarios) y publica `DECISION_AUTOMATICA` en
+   `crediya-decision-automatica`.
+3. `SQSListener` (entry point `sqs-listener`) lee esa cola y `ProcesarDecisionAutomaticaUseCase` aplica el resultado:
+   `APROBADA`/`RECHAZADA` cambian el estado y registran el aviso al solicitante (con el plan de pago si la aprobo); `REVISION_MANUAL`
+   solo cambia el estado (la decision final es de un asesor y aparece en el listado de HU4).
+
+Garantias: la cola entrega *al menos una vez*, por eso la decision es **idempotente** (solo se aplica si la solicitud sigue
+`PENDIENTE_REVISION`; una repetida, o una que un asesor ya decidio a mano, se ignora sin duplicar el correo). El listener borra el
+mensaje solo despues de procesarlo; si falla vuelve a la cola y tras 3 intentos va a `crediya-decision-automatica-dlq`. Si SQS no
+responde, el listener reintenta con espera creciente en vez de morir. Los tipos sin validacion automatica (VEHICULO, HIPOTECARIO)
+quedan pendientes para revision manual como en HU4.
+
+| Variable | Para que |
+|----------|----------|
+| `SQS_VALIDACION_URL` | Cola donde se publican los pedidos de evaluacion |
+| `SQS_DECISION_URL` | Cola que escucha el listener |
+| `SQS_LISTENER_ENABLED` | `false` apaga el listener (pruebas o instancias que no deben consumir) |
+
+Permisos de IAM de la tarea: `sqs:SendMessage` sobre las colas de notificaciones y validacion; `sqs:ReceiveMessage`, `sqs:DeleteMessage` y
+`sqs:GetQueueAttributes` sobre la cola de decisiones.
+
 ## Registrar una solicitud (HU2)
 
 El cliente se valida contra AUTENTICACION (`GET /api/v1/usuarios/{documento}`) y el email de la solicitud es el del cliente.
@@ -134,6 +162,9 @@ Levanta **SOLICITUDES** (http://localhost:8080), **AUTENTICACION** (http://local
 (`NOTIFICACIONES_REPO_PATH`, por defecto `../../lambda-notificaciones`). Las credenciales `test` del compose son ficticias y solo
 valen contra LocalStack. Para ver el correo de una aprobacion:
 `docker run --rm --network crediya_crediya-net -e AWS_ACCESS_KEY_ID=test -e AWS_SECRET_ACCESS_KEY=test amazon/aws-cli:2.27.50 --endpoint-url http://localstack:4566 --region us-east-1 sqs receive-message --queue-url http://localstack:4566/000000000000/crediya-correos-buzon --message-attribute-names All`.
+Tambien despliega `lambda-capacidad-endeudamiento` (`CAPACIDAD_REPO_PATH`, por defecto `../../lambda-capacidad-endeudamiento`), conectada a su cola, y el
+endpoint de consulta por API Gateway (la URL exacta la imprime `docker logs crediya-aws-init-1`):
+`POST http://localhost:4566/restapis/<id>/local/_user_request_/api/v1/calcular-capacidad`.
 LocalStack se fija en `4.9.2`: las imagenes `latest` posteriores exigen un `LOCALSTACK_AUTH_TOKEN`.
 SOLICITUDES llama a AUTENTICACION por el nombre del servicio de compose (`http://autenticacion:8080`) y valida los tokens
 con su JWKS; las bases de datos no se publican fuera de la red de compose.
