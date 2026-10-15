@@ -141,6 +141,8 @@ class AprobarRechazarSolicitudIntegrationTest {
         registro.add("AWS_ENDPOINT_URL", () -> LOCALSTACK.getEndpoint().toString());
         registro.add("SQS_NOTIFICACIONES_URL", () -> urlCola);
         registro.add("OUTBOX_INTERVALO", () -> "300ms");
+        // La cola de decisiones no se usa en estas pruebas
+        registro.add("SQS_LISTENER_ENABLED", () -> "false");
     }
 
     @AfterAll

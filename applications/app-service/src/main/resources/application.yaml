@@ -36,6 +36,7 @@ adapter:
     endpoint: "${AWS_ENDPOINT_URL:}"
     colas:
       notificaciones: "${SQS_NOTIFICACIONES_URL:http://localhost:4566/000000000000/crediya-notificaciones}"
+      validacion: "${SQS_VALIDACION_URL:http://localhost:4566/000000000000/crediya-validacion-automatica}"
 outbox:
   enabled: "${OUTBOX_ENABLED:true}"
   intervalo: "${OUTBOX_INTERVALO:2s}"
@@ -75,3 +76,12 @@ springdoc:
     path: "/v3/api-docs"
 cors:
   allowed-origins: "http://localhost:4200,http://localhost:8080"
+entrypoint:
+  sqs:
+    enabled: "${SQS_LISTENER_ENABLED:true}"
+    queueUrl: "${SQS_DECISION_URL:http://localhost:4566/000000000000/crediya-decision-automatica}"
+    waitTimeSeconds: 20
+    maxNumberOfMessages: 10
+    # Mayor que lo que tarda procesar un mensaje; si se vence, el mensaje vuelve a la cola
+    visibilityTimeoutSeconds: 60
+    numberOfThreads: 1

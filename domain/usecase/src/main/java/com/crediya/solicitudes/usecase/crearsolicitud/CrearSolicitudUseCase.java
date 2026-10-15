@@ -5,8 +5,11 @@ import com.crediya.solicitudes.model.cliente.exceptions.ClienteNoEncontradoExcep
 import com.crediya.solicitudes.model.cliente.gateways.ClienteGateway;
 import com.crediya.solicitudes.model.common.exceptions.AccesoDenegadoException;
 import com.crediya.solicitudes.model.common.gateways.TransaccionGateway;
+import com.crediya.solicitudes.model.evento.ValidacionAutomaticaSolicitada;
+import com.crediya.solicitudes.model.evento.gateways.EventoSalienteRepository;
 import com.crediya.solicitudes.model.seguridad.UsuarioAutenticado;
 import com.crediya.solicitudes.model.seguridad.gateways.ContextoSeguridadGateway;
+import com.crediya.solicitudes.model.solicitud.PrestamoAprobado;
 import com.crediya.solicitudes.model.solicitud.Solicitud;
 import com.crediya.solicitudes.model.solicitud.commands.CrearSolicitudCommand;
 import com.crediya.solicitudes.model.solicitud.exceptions.DatosSolicitudInvalidosException;
@@ -15,6 +18,9 @@ import com.crediya.solicitudes.model.solicitud.gateways.SolicitudRepository;
 import com.crediya.solicitudes.model.tipoprestamo.TipoPrestamo;
 import com.crediya.solicitudes.model.tipoprestamo.gateways.TipoPrestamoRepository;
 import reactor.core.publisher.Mono;
+
+import java.time.Clock;
+import java.util.List;
 
 /**
  * HU2 + HU3: registra una solicitud de prestamo verificando al cliente y el tipo de prestamo. Solo un CLIENTE
@@ -27,27 +33,49 @@ public class CrearSolicitudUseCase {
     private final SolicitudRepository solicitudRepository;
     private final TransaccionGateway transaccionGateway;
     private final ContextoSeguridadGateway contextoSeguridad;
+    private final EventoSalienteRepository eventoSalienteRepository;
+    private final Clock reloj;
 
     public CrearSolicitudUseCase(ClienteGateway clienteGateway,
                                  TipoPrestamoRepository tipoPrestamoRepository,
                                  SolicitudRepository solicitudRepository,
                                  TransaccionGateway transaccionGateway,
-                                 ContextoSeguridadGateway contextoSeguridad) {
+                                 ContextoSeguridadGateway contextoSeguridad,
+                                 EventoSalienteRepository eventoSalienteRepository,
+                                 Clock reloj) {
         this.clienteGateway = clienteGateway;
         this.tipoPrestamoRepository = tipoPrestamoRepository;
         this.solicitudRepository = solicitudRepository;
         this.transaccionGateway = transaccionGateway;
         this.contextoSeguridad = contextoSeguridad;
+        this.eventoSalienteRepository = eventoSalienteRepository;
+        this.reloj = reloj;
     }
 
     public Mono<Solicitud> ejecutar(CrearSolicitudCommand comando) {
         return Mono.fromCallable(() -> exigirDatosBasicos(comando))
                 .flatMap(this::autorizar)
                 .flatMap(this::cargarContexto)
-                .map(contexto -> Solicitud.crear(contexto.cliente().email(), comando.monto(), comando.plazo(),
-                        contexto.tipoPrestamo()))
-                .flatMap(solicitudRepository::guardar)
+                .flatMap(contexto -> solicitudRepository
+                        .guardar(Solicitud.crear(contexto.cliente().email(), comando.monto(), comando.plazo(), contexto.tipoPrestamo()))
+                        .flatMap(guardada -> pedirValidacionAutomatica(guardada, contexto.cliente())))
                 .as(transaccionGateway::ejecutar);
+    }
+
+    /**
+     * HU7: los tipos de prestamo con validacion automatica generan, en la misma transaccion que la solicitud, el evento que
+     * pide evaluar la capacidad de endeudamiento. Los demas quedan Pendientes para revision manual.
+     */
+    private Mono<Solicitud> pedirValidacionAutomatica(Solicitud solicitud, Cliente cliente) {
+        if (!solicitud.tipoPrestamo().validacionAutomatica()) {
+            return Mono.just(solicitud);
+        }
+        return solicitudRepository.buscarAprobadasPorEmails(List.of(solicitud.email()))
+                .map(PrestamoAprobado::de)
+                .collectList()
+                .flatMap(aprobados -> eventoSalienteRepository.registrar(new ValidacionAutomaticaSolicitada(
+                        reloj.instant(), solicitud, cliente.nombreCompleto(), cliente.salarioBase(), aprobados)))
+                .thenReturn(solicitud);
     }
 
     /**

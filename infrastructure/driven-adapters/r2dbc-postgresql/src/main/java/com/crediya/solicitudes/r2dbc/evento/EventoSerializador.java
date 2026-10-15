@@ -3,7 +3,9 @@ package com.crediya.solicitudes.r2dbc.evento;
 import com.crediya.solicitudes.model.evento.Destino;
 import com.crediya.solicitudes.model.evento.EventoDeDominio;
 import com.crediya.solicitudes.model.evento.SolicitudDecidida;
+import com.crediya.solicitudes.model.evento.ValidacionAutomaticaSolicitada;
 import com.crediya.solicitudes.model.solicitud.CuotaPlanDePago;
+import com.crediya.solicitudes.model.solicitud.PrestamoAprobado;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -23,13 +25,46 @@ final class EventoSerializador {
     static Destino destinoDe(EventoDeDominio evento) {
         return switch (evento) {
             case SolicitudDecidida e -> Destino.NOTIFICACIONES;
+            case ValidacionAutomaticaSolicitada e -> Destino.VALIDACION;
         };
     }
 
     static String aJson(EventoDeDominio evento) {
         return switch (evento) {
             case SolicitudDecidida e -> solicitudDecidida(e).toString();
+            case ValidacionAutomaticaSolicitada e -> validacionSolicitada(e).toString();
         };
+    }
+
+    private static ObjectNode validacionSolicitada(ValidacionAutomaticaSolicitada evento) {
+        var solicitud = evento.solicitud();
+        ObjectNode raiz = MAPPER.createObjectNode();
+        raiz.put("version", VERSION);
+        raiz.put("tipo", "VALIDACION_AUTOMATICA_SOLICITADA");
+        raiz.put("ocurrido_en", evento.ocurridoEn().toString());
+
+        ObjectNode datos = raiz.putObject("solicitud");
+        datos.put("id_solicitud", solicitud.id().toString());
+        datos.put("monto", solicitud.monto());
+        datos.put("plazo", solicitud.plazo());
+        datos.put("tasa_interes", solicitud.tipoPrestamo().tasaInteres());
+        datos.put("tipo_prestamo", solicitud.tipoPrestamo().nombre());
+
+        ObjectNode solicitante = raiz.putObject("solicitante");
+        solicitante.put("email", solicitud.email());
+        if (evento.nombreCliente() != null) {
+            solicitante.put("nombre", evento.nombreCliente());
+        }
+        solicitante.put("salario_base", evento.salarioBase());
+
+        ArrayNode aprobados = raiz.putArray("prestamos_aprobados");
+        for (PrestamoAprobado prestamo : evento.prestamosAprobados()) {
+            ObjectNode fila = aprobados.addObject();
+            fila.put("monto", prestamo.monto());
+            fila.put("plazo", prestamo.plazo());
+            fila.put("tasa_interes", prestamo.tasaInteres());
+        }
+        return raiz;
     }
 
     private static ObjectNode solicitudDecidida(SolicitudDecidida evento) {
