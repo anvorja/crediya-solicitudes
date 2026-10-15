@@ -108,6 +108,14 @@ class SolicitudTest {
     }
 
     @Test
+    @DisplayName("la cuota mensual debe calcularse con el monto, la tasa del tipo y el plazo de la solicitud")
+    void cuotaMensual_debeUsarMontoTasaYPlazo() {
+        var solicitud = Solicitud.crear("a@b.co", new BigDecimal("5000000"), 24, TipoPrestamoFixture.personal());
+
+        assertThat(solicitud.cuotaMensual()).isEqualByComparingTo("258404.18");
+    }
+
+    @Test
     @DisplayName("los estados deben tener una descripcion legible")
     void estados_debenTenerDescripcion() {
         for (EstadoSolicitud estado : EstadoSolicitud.values()) {

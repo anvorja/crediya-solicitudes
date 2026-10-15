@@ -47,17 +47,23 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Testcontainers
 @AutoConfigureWebTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@DisplayName("HU2 + HU3 - Registrar una solicitud de prestamo con autenticacion (aplicacion completa)")
+@DisplayName("HU2 + HU3 + HU4 - Solicitudes de prestamo con autenticacion (aplicacion completa)")
 class CrearSolicitudIntegrationTest {
 
     private static final String RUTA = "/api/v1/solicitud";
     private static final String DOCUMENTO_MARIA = "1020304050";
     private static final String DOCUMENTO_INEXISTENTE = "99999999";
     private static final String DOCUMENTO_CON_FALLA = "5000000000";
-    private static final Map<String, String> CLIENTES = Map.of(DOCUMENTO_MARIA, """
+    private static final String JSON_MARIA = """
             {"id":"6f1c1c52-1d5e-4a45-9b52-8b1f3f1a0a11","nombres":"Maria","apellidos":"Gomez",
              "documento_identidad":"1020304050","correo_electronico":"maria@example.com",
-             "salario_base":4500000,"rol":"CLIENTE"}""");
+             "salario_base":4500000,"rol":"CLIENTE"}""";
+    private static final String JSON_PEDRO = """
+            {"id":"7a2d2d63-2e6f-4b56-8c63-9c2a4a2b1b22","nombres":"Pedro","apellidos":"Ruiz",
+             "documento_identidad":"2020202020","correo_electronico":"pedro@example.com",
+             "salario_base":3000000,"rol":"CLIENTE"}""";
+    private static final Map<String, String> CLIENTES = Map.of(DOCUMENTO_MARIA, JSON_MARIA);
+    private static final Map<String, String> CLIENTES_POR_EMAIL = Map.of("maria@example.com", JSON_MARIA, "pedro@example.com", JSON_PEDRO);
 
     @Container
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
@@ -74,8 +80,11 @@ class CrearSolicitudIntegrationTest {
                 if (ruta.equals("/.well-known/jwks.json")) {
                     return json(200, new JWKSet(CLAVE_DE_AUTENTICACION.toPublicJWK()).toString());
                 }
-                String documento = ruta.substring(ruta.lastIndexOf('/') + 1);
                 String autorizacion = peticion.getHeader(HttpHeaders.AUTHORIZATION);
+                if (ruta.startsWith("/api/v1/usuarios?")) {
+                    return consultaPorLotes(ruta, autorizacion);
+                }
+                String documento = ruta.substring(ruta.lastIndexOf('/') + 1);
                 CONSULTAS_A_AUTENTICACION.add(documento + "|" + autorizacion);
                 if (autorizacion == null || !autorizacion.startsWith("Bearer ")) {
                     return json(401, "{}");
@@ -92,6 +101,19 @@ class CrearSolicitudIntegrationTest {
         } catch (IOException e) {
             throw new IllegalStateException("No se pudo iniciar el servidor simulado de autenticacion", e);
         }
+    }
+
+    /** Simula GET /api/v1/usuarios?correos=a,b: devuelve solo los conocidos y exige el token reenviado. */
+    private static MockResponse consultaPorLotes(String ruta, String autorizacion) {
+        CONSULTAS_A_AUTENTICACION.add("lote|" + autorizacion);
+        if (autorizacion == null || !autorizacion.startsWith("Bearer ")) {
+            return json(401, "{}");
+        }
+        String correos = java.net.URLDecoder.decode(ruta.substring(ruta.indexOf("correos=") + 8), java.nio.charset.StandardCharsets.UTF_8);
+        String lista = java.util.Arrays.stream(correos.split(","))
+                .map(CLIENTES_POR_EMAIL::get).filter(java.util.Objects::nonNull)
+                .collect(java.util.stream.Collectors.joining(",", "[", "]"));
+        return json(200, lista);
     }
 
     private static MockResponse json(int estado, String cuerpo) {
@@ -335,5 +357,137 @@ class CrearSolicitudIntegrationTest {
                 .jsonPath("$.components.securitySchemes.bearerAuth.scheme").isEqualTo("bearer");
         client.get().uri("/actuator/health").exchange().expectStatus().isOk()
                 .expectBody().jsonPath("$.status").isEqualTo("UP");
+    }
+
+    // ---------- HU4: listado para revision manual ----------
+
+    private void sembrar(String email, String monto, int plazo, int idEstado, int idTipo) {
+        databaseClient.sql("""
+                        INSERT INTO solicitud (monto, plazo, email, id_estado, id_tipo_prestamo)
+                        VALUES (:monto, :plazo, :email, :estado, :tipo)""")
+                .bind("monto", new java.math.BigDecimal(monto)).bind("plazo", plazo).bind("email", email)
+                .bind("estado", (short) idEstado).bind("tipo", (short) idTipo)
+                .then().block();
+    }
+
+    /** Estados: 1 pendiente, 2 revision manual, 3 aprobada, 4 rechazada. Tipos: 1 PERSONAL, 3 VEHICULO. */
+    private void sembrarEscenario() {
+        sembrar("maria@example.com", "5000000", 24, 3, 1);    // aprobada: cuenta para la deuda de Maria
+        sembrar("maria@example.com", "2000000", 12, 1, 1);    // pendiente
+        sembrar("pedro@example.com", "20000000", 36, 4, 3);   // rechazada (VEHICULO)
+        sembrar("ana@example.com", "3000000", 12, 2, 1);      // revision manual; AUTENTICACION no la conoce
+        sembrar("carlos@example.com", "4000000", 12, 3, 1);   // aprobada: no aparece en el listado
+    }
+
+    private WebTestClient.ResponseSpec listar(String token, String consulta) {
+        var peticion = client.get().uri(RUTA + consulta);
+        if (token != null) {
+            peticion.header(HttpHeaders.AUTHORIZATION, "Bearer " + token);
+        }
+        return peticion.exchange();
+    }
+
+    private static String tokenAsesor() {
+        return token(CLAVE_DE_AUTENTICACION, "ASESOR", "3030303030", "crediya", 60_000);
+    }
+
+    @Test
+    @DisplayName("HU4: un ASESOR lista las solicitudes de revision con nombre, salario y deuda mensual de las aprobadas")
+    void asesor_listaSolicitudesParaRevision() {
+        sembrarEscenario();
+        String token = tokenAsesor();
+
+        listar(token, "")
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.total_elementos").isEqualTo(3)
+                .jsonPath("$.total_paginas").isEqualTo(1)
+                .jsonPath("$.contenido.length()").isEqualTo(3)
+                // De la mas antigua a la mas reciente: maria (pendiente), pedro (rechazada), ana (revision manual)
+                .jsonPath("$.contenido[0].email").isEqualTo("maria@example.com")
+                .jsonPath("$.contenido[0].nombre").isEqualTo("Maria Gomez")
+                .jsonPath("$.contenido[0].salario_base").isEqualTo(4500000)
+                .jsonPath("$.contenido[0].estado_solicitud").isEqualTo("PENDIENTE_REVISION")
+                .jsonPath("$.contenido[0].tipo_prestamo").isEqualTo("PERSONAL")
+                .jsonPath("$.contenido[0].tasa_interes").isEqualTo(0.018)
+                .jsonPath("$.contenido[0].deuda_total_mensual_solicitudes_aprobadas").isEqualTo(258404.18)
+                .jsonPath("$.contenido[1].nombre").isEqualTo("Pedro Ruiz")
+                .jsonPath("$.contenido[1].estado_solicitud").isEqualTo("RECHAZADA")
+                .jsonPath("$.contenido[1].tipo_prestamo").isEqualTo("VEHICULO")
+                .jsonPath("$.contenido[1].deuda_total_mensual_solicitudes_aprobadas").isEqualTo(0)
+                .jsonPath("$.contenido[2].email").isEqualTo("ana@example.com")
+                .jsonPath("$.contenido[2].nombre").isEmpty()
+                .jsonPath("$.contenido[2].salario_base").isEmpty();
+
+        // Una sola consulta por lotes a AUTENTICACION, con el token del asesor reenviado
+        assertThat(CONSULTAS_A_AUTENTICACION).containsExactly("lote|Bearer " + token);
+    }
+
+    @Test
+    @DisplayName("HU4: el listado se puede filtrar por estado y por tipo de prestamo")
+    void listado_sePuedeFiltrar() {
+        sembrarEscenario();
+
+        listar(tokenAsesor(), "?estado=RECHAZADA")
+                .expectStatus().isOk()
+                .expectBody().jsonPath("$.total_elementos").isEqualTo(1).jsonPath("$.contenido[0].email").isEqualTo("pedro@example.com");
+        listar(tokenAsesor(), "?tipo_prestamo=vehiculo")
+                .expectStatus().isOk()
+                .expectBody().jsonPath("$.total_elementos").isEqualTo(1).jsonPath("$.contenido[0].email").isEqualTo("pedro@example.com");
+        listar(tokenAsesor(), "?estado=REVISION_MANUAL,PENDIENTE_REVISION&tipo_prestamo=PERSONAL")
+                .expectStatus().isOk()
+                .expectBody().jsonPath("$.total_elementos").isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("HU4: el listado se pagina y siempre informa el total")
+    void listado_sePagina() {
+        sembrarEscenario();
+
+        listar(tokenAsesor(), "?tamano=2&pagina=1")
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.contenido.length()").isEqualTo(1)
+                .jsonPath("$.contenido[0].email").isEqualTo("ana@example.com")
+                .jsonPath("$.pagina").isEqualTo(1)
+                .jsonPath("$.tamano").isEqualTo(2)
+                .jsonPath("$.total_elementos").isEqualTo(3)
+                .jsonPath("$.total_paginas").isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("HU4: sin solicitudes de revision el listado es una pagina vacia y no consulta a AUTENTICACION")
+    void listadoVacio_noConsultaAutenticacion() {
+        listar(tokenAsesor(), "")
+                .expectStatus().isOk()
+                .expectBody().jsonPath("$.contenido.length()").isEqualTo(0).jsonPath("$.total_elementos").isEqualTo(0);
+
+        assertThat(CONSULTAS_A_AUTENTICACION).isEmpty();
+    }
+
+    @Test
+    @DisplayName("HU4: solo un ASESOR puede listar: CLIENTE y ADMIN reciben 403 y sin token 401")
+    void listado_soloAsesor() {
+        sembrarEscenario();
+
+        for (String rol : List.of("CLIENTE", "ADMIN")) {
+            listar(token(CLAVE_DE_AUTENTICACION, rol, "3030303030", "crediya", 60_000), "")
+                    .expectStatus().isForbidden();
+        }
+        listar(null, "").expectStatus().isUnauthorized();
+        assertThat(CONSULTAS_A_AUTENTICACION).isEmpty();
+    }
+
+    @Test
+    @DisplayName("HU4: los parametros invalidos dan 400 con el detalle")
+    void listado_validaParametros() {
+        String token = tokenAsesor();
+
+        listar(token, "?estado=APROBADA").expectStatus().isBadRequest();
+        listar(token, "?tamano=0").expectStatus().isBadRequest();
+        listar(token, "?tamano=51").expectStatus().isBadRequest();
+        listar(token, "?pagina=-1").expectStatus().isBadRequest();
+        listar(token, "?pagina=abc").expectStatus().isBadRequest()
+                .expectBody().jsonPath("$.detalles.pagina").isNotEmpty();
     }
 }

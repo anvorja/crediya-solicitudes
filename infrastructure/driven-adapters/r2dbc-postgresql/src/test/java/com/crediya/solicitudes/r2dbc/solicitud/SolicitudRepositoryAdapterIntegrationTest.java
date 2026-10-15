@@ -2,6 +2,7 @@ package com.crediya.solicitudes.r2dbc.solicitud;
 
 import com.crediya.solicitudes.model.solicitud.EstadoSolicitud;
 import com.crediya.solicitudes.model.solicitud.Solicitud;
+import com.crediya.solicitudes.model.solicitud.queries.FiltroSolicitudes;
 import com.crediya.solicitudes.model.tipoprestamo.TipoPrestamo;
 import com.crediya.solicitudes.r2dbc.PostgresTestSupport;
 import com.crediya.solicitudes.r2dbc.tipoprestamo.TipoPrestamoRepositoryAdapter;
@@ -23,6 +24,7 @@ import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -118,6 +120,97 @@ class SolicitudRepositoryAdapterIntegrationTest {
                     .verifyComplete();
         }
         assertThat(contarSolicitudes()).isEqualTo(4L);
+    }
+
+    // ---------- HU4: listado para revision ----------
+
+    private static Solicitud guardarConEstado(String email, String monto, EstadoSolicitud estado, String tipo) {
+        var tipoPrestamo = tipos.buscarPorNombre(tipo).block();
+        return solicitudes.guardar(new Solicitud(null, new BigDecimal(monto), 12, email, estado, tipoPrestamo)).block();
+    }
+
+    @Test
+    @DisplayName("buscarParaRevision debe listar por defecto pendientes, revision manual y rechazadas, de la mas antigua a la mas reciente")
+    void buscarParaRevision_debeListarEnOrdenDeAtencion() {
+        var primera = guardarConEstado("a@example.com", "1000000", EstadoSolicitud.PENDIENTE_REVISION, "PERSONAL");
+        var segunda = guardarConEstado("b@example.com", "2000000", EstadoSolicitud.RECHAZADA, "PERSONAL");
+        var tercera = guardarConEstado("c@example.com", "3000000", EstadoSolicitud.REVISION_MANUAL, "VEHICULO");
+        guardarConEstado("d@example.com", "4000000", EstadoSolicitud.APROBADA, "PERSONAL");
+
+        StepVerifier.create(solicitudes.buscarParaRevision(FiltroSolicitudes.de(null, null, 0, 10)))
+                .assertNext(pagina -> {
+                    assertThat(pagina.totalElementos()).isEqualTo(3);
+                    assertThat(pagina.elementos()).extracting(Solicitud::id)
+                            .containsExactly(primera.id(), segunda.id(), tercera.id());
+                    assertThat(pagina.elementos().get(2).tipoPrestamo().nombre()).isEqualTo("VEHICULO");
+                    assertThat(pagina.elementos().get(0).tipoPrestamo().tasaInteres()).isEqualByComparingTo("0.018");
+                })
+                .verifyComplete();
+    }
+
+    @Test
+    @DisplayName("buscarParaRevision debe paginar: respeta tamano y pagina y siempre informa el total")
+    void buscarParaRevision_debePaginar() {
+        for (int i = 0; i < 5; i++) {
+            guardarConEstado("u" + i + "@example.com", "1000000", EstadoSolicitud.PENDIENTE_REVISION, "PERSONAL");
+        }
+
+        StepVerifier.create(solicitudes.buscarParaRevision(FiltroSolicitudes.de(null, null, 0, 2)))
+                .assertNext(pagina -> {
+                    assertThat(pagina.elementos()).extracting(Solicitud::email).containsExactly("u0@example.com", "u1@example.com");
+                    assertThat(pagina.totalElementos()).isEqualTo(5);
+                    assertThat(pagina.totalPaginas()).isEqualTo(3);
+                })
+                .verifyComplete();
+        StepVerifier.create(solicitudes.buscarParaRevision(FiltroSolicitudes.de(null, null, 2, 2)))
+                .assertNext(pagina -> assertThat(pagina.elementos()).extracting(Solicitud::email).containsExactly("u4@example.com"))
+                .verifyComplete();
+        StepVerifier.create(solicitudes.buscarParaRevision(FiltroSolicitudes.de(null, null, 9, 2)))
+                .assertNext(pagina -> {
+                    assertThat(pagina.elementos()).isEmpty();
+                    assertThat(pagina.totalElementos()).isEqualTo(5);
+                })
+                .verifyComplete();
+    }
+
+    @Test
+    @DisplayName("buscarParaRevision debe filtrar por estado y por tipo de prestamo (sin distinguir mayusculas)")
+    void buscarParaRevision_debeFiltrar() {
+        guardarConEstado("a@example.com", "1000000", EstadoSolicitud.PENDIENTE_REVISION, "PERSONAL");
+        var rechazadaVehiculo = guardarConEstado("b@example.com", "20000000", EstadoSolicitud.RECHAZADA, "VEHICULO");
+        guardarConEstado("c@example.com", "3000000", EstadoSolicitud.RECHAZADA, "PERSONAL");
+
+        StepVerifier.create(solicitudes.buscarParaRevision(
+                        FiltroSolicitudes.de(List.of(EstadoSolicitud.RECHAZADA), "vehiculo", 0, 10)))
+                .assertNext(pagina -> {
+                    assertThat(pagina.elementos()).extracting(Solicitud::id).containsExactly(rechazadaVehiculo.id());
+                    assertThat(pagina.totalElementos()).isEqualTo(1);
+                })
+                .verifyComplete();
+        StepVerifier.create(solicitudes.buscarParaRevision(FiltroSolicitudes.de(List.of(EstadoSolicitud.RECHAZADA), null, 0, 10)))
+                .assertNext(pagina -> assertThat(pagina.totalElementos()).isEqualTo(2))
+                .verifyComplete();
+        StepVerifier.create(solicitudes.buscarParaRevision(FiltroSolicitudes.de(null, "HIPOTECARIO", 0, 10)))
+                .assertNext(pagina -> assertThat(pagina.elementos()).isEmpty())
+                .verifyComplete();
+    }
+
+    @Test
+    @DisplayName("buscarAprobadasPorEmails debe devolver solo las aprobadas de los correos pedidos (sin distinguir mayusculas)")
+    void buscarAprobadasPorEmails_debeDevolverSoloLasAprobadas() {
+        var aprobadaMaria = guardarConEstado("maria@example.com", "5000000", EstadoSolicitud.APROBADA, "PERSONAL");
+        guardarConEstado("maria@example.com", "1000000", EstadoSolicitud.PENDIENTE_REVISION, "PERSONAL");
+        guardarConEstado("pedro@example.com", "1000000", EstadoSolicitud.APROBADA, "PERSONAL");
+        guardarConEstado("ana@example.com", "1000000", EstadoSolicitud.APROBADA, "PERSONAL");
+
+        StepVerifier.create(solicitudes.buscarAprobadasPorEmails(List.of("maria@example.com", "ana@example.com")).collectList())
+                .assertNext(lista -> {
+                    assertThat(lista).hasSize(2);
+                    assertThat(lista).extracting(Solicitud::email).containsExactlyInAnyOrder("maria@example.com", "ana@example.com");
+                    assertThat(lista).extracting(Solicitud::id).contains(aprobadaMaria.id());
+                    assertThat(lista).allMatch(solicitud -> solicitud.estado() == EstadoSolicitud.APROBADA);
+                })
+                .verifyComplete();
     }
 
     @Test

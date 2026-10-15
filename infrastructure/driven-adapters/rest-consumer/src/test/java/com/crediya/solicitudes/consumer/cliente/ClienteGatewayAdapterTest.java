@@ -18,6 +18,7 @@ import reactor.netty.http.client.HttpClient;
 import reactor.test.StepVerifier;
 
 import java.io.IOException;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -172,5 +173,73 @@ class ClienteGatewayAdapterTest {
         StepVerifier.create(adaptador.buscarPorDocumento("1")).expectError(ServicioNoDisponibleException.class).verify();
 
         assertThat(servidor.getRequestCount()).isEqualTo(llamadasAntes);
+    }
+
+    // ---------- HU4: consulta por lotes ----------
+
+    private static final String LISTA_USUARIOS = """
+            [{"nombres":"Maria","apellidos":"Gomez","documento_identidad":"1020304050","correo_electronico":"maria@example.com",
+              "salario_base":4500000,"rol":"CLIENTE","dato_nuevo":"x"},
+             {"nombres":"Pedro","apellidos":"Ruiz","documento_identidad":"2020202020","correo_electronico":"pedro@example.com",
+              "salario_base":3000000,"rol":"CLIENTE"}]""";
+
+    @Test
+    @DisplayName("por correos: debe enviar los correos en un solo parametro y mapear la lista de clientes")
+    void porCorreos_debeMapearLaLista() throws InterruptedException {
+        servidor.enqueue(json(200, LISTA_USUARIOS));
+
+        StepVerifier.create(adaptador().buscarPorEmails(List.of("maria@example.com", "pedro@example.com")).collectList())
+                .assertNext(clientes -> {
+                    assertThat(clientes).extracting(cliente -> cliente.email()).containsExactly("maria@example.com", "pedro@example.com");
+                    assertThat(clientes.get(0).nombreCompleto()).isEqualTo("Maria Gomez");
+                    assertThat(clientes.get(1).salarioBase()).isEqualByComparingTo("3000000");
+                })
+                .verifyComplete();
+
+        RecordedRequest peticion = servidor.takeRequest();
+        assertThat(peticion.getPath()).startsWith("/api/v1/usuarios?correos=");
+        assertThat(java.net.URLDecoder.decode(peticion.getPath(), java.nio.charset.StandardCharsets.UTF_8))
+                .endsWith("correos=maria@example.com,pedro@example.com");
+    }
+
+    @Test
+    @DisplayName("por correos: cuando AUTENTICACION devuelve una lista vacia, debe devolver un Flux vacio")
+    void porCorreos_listaVacia_debeDevolverVacio() {
+        servidor.enqueue(json(200, "[]"));
+
+        StepVerifier.create(adaptador().buscarPorEmails(List.of("nadie@example.com"))).verifyComplete();
+    }
+
+    @Test
+    @DisplayName("por correos: cuando no se piden correos, no debe llamar a AUTENTICACION")
+    void porCorreos_sinCorreos_noDebeLlamar() {
+        StepVerifier.create(adaptador().buscarPorEmails(List.of())).verifyComplete();
+
+        assertThat(servidor.getRequestCount()).isZero();
+    }
+
+    @Test
+    @DisplayName("por correos: cuando AUTENTICACION falla con 5xx una vez, debe reintentar y recuperarse")
+    void porCorreos_5xxTransitorio_debeReintentar() {
+        servidor.enqueue(json(502, "{}"));
+        servidor.enqueue(json(200, LISTA_USUARIOS));
+
+        StepVerifier.create(adaptador().buscarPorEmails(List.of("maria@example.com")).count())
+                .expectNext(2L)
+                .verifyComplete();
+
+        assertThat(servidor.getRequestCount()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("por correos: cuando AUTENTICACION deniega (403) o falla, debe lanzar ServicioNoDisponibleException sin reintentar un 4xx")
+    void porCorreos_403_debeLanzarServicioNoDisponible() {
+        servidor.enqueue(json(403, "{}"));
+
+        StepVerifier.create(adaptador().buscarPorEmails(List.of("maria@example.com")))
+                .expectError(ServicioNoDisponibleException.class)
+                .verify();
+
+        assertThat(servidor.getRequestCount()).isEqualTo(1);
     }
 }

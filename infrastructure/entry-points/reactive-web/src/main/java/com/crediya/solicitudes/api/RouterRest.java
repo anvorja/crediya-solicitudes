@@ -20,6 +20,8 @@ public class RouterRest {
         return route()
                 .POST(ApiRoutes.SOLICITUD, accept(MediaType.APPLICATION_JSON),
                         solicitudHandler::crearSolicitud, SolicitudOpenApi::crearSolicitud)
+                .GET(ApiRoutes.SOLICITUD, accept(MediaType.APPLICATION_JSON),
+                        solicitudHandler::listarSolicitudes, SolicitudOpenApi::listarSolicitudes)
                 .build();
     }
 }
