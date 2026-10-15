@@ -1,0 +1,7 @@
+dependencies {
+    implementation project(':model')
+    implementation 'org.springframework:spring-context'
+    implementation 'org.springframework.security:spring-security-core'
+    // Tipo Jwt (claims del token validado por el entry point)
+    implementation 'org.springframework.security:spring-security-oauth2-jose'
+}

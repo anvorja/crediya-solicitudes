@@ -1,0 +1,46 @@
+apply plugin: 'org.springframework.boot'
+
+dependencies {
+	implementation project(':sqs-listener')
+	implementation project(':sqs-sender')
+	implementation project(':metrics')
+	implementation 'software.amazon.awssdk:sts'
+	implementation project(':security-context')
+    implementation project(':rest-consumer')
+    implementation project(':r2dbc-postgresql')
+    implementation project(':reactive-web')
+    implementation project(':model')
+    implementation project(':usecase')
+
+    implementation 'org.springframework.boot:spring-boot-starter'
+    implementation 'org.springframework.boot:spring-boot-starter-webflux'
+    implementation 'org.springframework.boot:spring-boot-starter-data-r2dbc'
+
+    // Solo para desarrollo local: 'developmentOnly' lo excluye del jar que se empaqueta en la imagen
+    developmentOnly 'org.springframework.boot:spring-boot-devtools'
+
+    testImplementation 'com.tngtech.archunit:archunit:1.4.1'
+    testImplementation 'com.fasterxml.jackson.core:jackson-databind'
+    testImplementation 'org.springframework.security:spring-security-oauth2-jose'
+    testImplementation 'org.testcontainers:postgresql'
+    testImplementation 'org.testcontainers:localstack'
+    testImplementation 'software.amazon.awssdk:sqs'
+    testImplementation 'org.testcontainers:junit-jupiter'
+    testImplementation 'com.squareup.okhttp3:okhttp:5.1.0'
+    testImplementation 'com.squareup.okhttp3:mockwebserver:5.1.0'
+}
+
+tasks.register('explodedJar', Copy) {
+    with jar
+    into layout.buildDirectory.dir("exploded")
+}
+
+jar {
+    // To disable the *-plain.jar
+    enabled = false
+}
+
+bootJar {
+    // Sets output jar name
+    archiveFileName = "${project.getParent().getName()}.${archiveExtension.get()}"
+}

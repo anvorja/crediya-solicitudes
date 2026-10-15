@@ -1,0 +1,16 @@
+# Mantiene el contexto de construccion pequeno y evita filtrar secretos o artefactos locales
+.git
+.gitignore
+.gradle
+.idea
+**/build
+build-cache
+**/*.iml
+**/.DS_Store
+.env
+.env.*
+!.env.example
+
+README.md
+scripts
+logs

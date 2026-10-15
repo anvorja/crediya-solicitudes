@@ -1,0 +1,1 @@
+// El dominio no declara dependencias de infraestructura. Las versiones de Reactor las aporta reactor-bom (ver main.gradle)
