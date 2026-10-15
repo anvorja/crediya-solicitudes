@@ -33,6 +33,7 @@ public class RestConsumerConfig {
             .baseUrl(url)
             .defaultHeader(HttpHeaders.CONTENT_TYPE, "application/json")
             .clientConnector(getClientHttpConnector())
+            .filter(new BearerTokenForwardingFilter())
             .build();
     }
 

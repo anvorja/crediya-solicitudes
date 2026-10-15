@@ -9,7 +9,7 @@ Solicitudes de prestamo de la plataforma CrediYa. Arquitectura hexagonal / Clean
 | HU | Descripcion | Rama | Estado |
 |----|-------------|------|--------|
 | HU2 | Registrar una solicitud de prestamo (`POST /api/v1/solicitud`) | `feature/HU-02-solicitud` | Hecha |
-| HU3 | Autenticacion: solo un cliente crea solicitudes y solo a su nombre | `feature/HU-03-...` | Pendiente |
+| HU3 | Autenticacion: solo un cliente crea solicitudes y solo a su nombre | `feature/HU-03-seguridad` | Hecha |
 | HU4 | Listado de solicitudes para revision manual (`GET /api/v1/solicitud`) | `feature/HU-04-...` | Pendiente |
 | HU5 | Contenerizacion con Docker y docker-compose | `feature/HU-05-...` | Pendiente |
 | HU6 | Aprobar o rechazar una solicitud (`PUT /api/v1/solicitud`) + notificacion | `feature/HU-06-...` | Pendiente |
@@ -32,12 +32,27 @@ infraestructura (adaptadores/gateways); los errores de dominio llevan un codigo 
 (extiende `AbstractErrorWebExceptionHandler`) los traduce a HTTP; la documentacion OpenAPI esta en una clase utilitaria
 (`SolicitudOpenApi`), no en anotaciones; validacion tanto en DTO (Bean Validation) como en dominio.
 
+## Seguridad (HU3)
+
+Este servicio es un *resource server*: valida los JWT RS256 que emite AUTENTICACION usando **solo su clave publica**
+(`GET /.well-known/jwks.json`, cacheada); no comparte ningun secreto. Se comprueban firma, vigencia, emisor y audiencia.
+
+| Endpoint | Quien puede |
+|----------|-------------|
+| `/actuator/health`, `/v3/api-docs`, Swagger UI | Publico |
+| `POST /api/v1/solicitud` | Solo `CLIENTE`, y unicamente a nombre de su propio `documento_identidad` |
+
+- Un token sin rol no concede ningun permiso (403). Un token invalido, vencido, de otra audiencia o firmado con otra clave da 401.
+- El token del cliente se **reenvia** a AUTENTICACION al validar al cliente, de modo que ese servicio aplica sus propias reglas.
+- Los errores 401/403 usan el mismo formato JSON que el resto de la API y no revelan el motivo del rechazo.
+
 ## Registrar una solicitud (HU2)
 
 El cliente se valida contra AUTENTICACION (`GET /api/v1/usuarios/{documento}`) y el email de la solicitud es el del cliente.
 
 ```bash
-curl -i -X POST http://localhost:8080/api/v1/solicitud -H 'Content-Type: application/json' -d '{
+# TOKEN=<access_token de un CLIENTE, obtenido en POST /api/v1/login de AUTENTICACION>
+curl -i -X POST http://localhost:8080/api/v1/solicitud -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{
   "documento_identidad": "1020304050", "monto": 5000000, "plazo": 24, "tipo_prestamo": "PERSONAL"
 }'
 ```
@@ -48,6 +63,8 @@ Tipos de prestamo sembrados por Flyway: `PERSONAL`, `LIBRE_INVERSION`, `VEHICULO
 |--------|--------|
 | 201 | Solicitud registrada en estado `PENDIENTE_REVISION` |
 | 400 | Campos invalidos, tipo de prestamo inexistente o monto fuera del rango del tipo |
+| 401 | Falta el token o no es valido |
+| 403 | El rol no es `CLIENTE` o el documento no es el del usuario autenticado |
 | 404 | El cliente no esta registrado en AUTENTICACION |
 | 503 | AUTENTICACION no responde (tras reintentos) o el circuit breaker esta abierto |
 | 500 | Error inesperado (mensaje generico, sin detalles internos) |
@@ -59,7 +76,8 @@ Requisitos: Java 21 y Docker (PostgreSQL local y tests de integracion con Testco
 ```bash
 docker run -d --name crediya-solicitudes-db -e POSTGRES_DB=crediya_solicitudes -e POSTGRES_USER=crediya \
   -e POSTGRES_PASSWORD=cambia-esta-clave -p 5432:5432 postgres:16-alpine
-export DB_USERNAME=crediya DB_PASSWORD=cambia-esta-clave AUTH_SERVICE_URL=http://localhost:8081
+export DB_USERNAME=crediya DB_PASSWORD=cambia-esta-clave
+export AUTH_SERVICE_URL=http://localhost:8081 AUTH_JWKS_URI=http://localhost:8081/.well-known/jwks.json
 ./gradlew bootRun
 ```
 

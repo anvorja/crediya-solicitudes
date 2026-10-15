@@ -1,7 +1,9 @@
 apply plugin: 'org.springframework.boot'
 
 dependencies {
+	implementation project(':security-context')
     implementation project(':rest-consumer')
+    implementation project(':security-context')
     implementation project(':r2dbc-postgresql')
     implementation project(':reactive-web')
     implementation project(':model')
@@ -15,6 +17,7 @@ dependencies {
 
     testImplementation 'com.tngtech.archunit:archunit:1.4.1'
     testImplementation 'com.fasterxml.jackson.core:jackson-databind'
+    testImplementation 'org.springframework.security:spring-security-oauth2-jose'
     testImplementation 'org.testcontainers:postgresql'
     testImplementation 'org.testcontainers:junit-jupiter'
     testImplementation 'com.squareup.okhttp3:okhttp:5.1.0'

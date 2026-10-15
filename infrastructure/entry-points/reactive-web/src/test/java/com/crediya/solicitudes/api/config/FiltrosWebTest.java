@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.test.web.reactive.server.WebTestClient;
+import org.springframework.web.cors.reactive.CorsWebFilter;
 import org.springframework.web.reactive.function.server.RouterFunctions;
 import org.springframework.web.reactive.function.server.ServerResponse;
 
@@ -17,7 +18,7 @@ class FiltrosWebTest {
 
     private final WebTestClient client = WebTestClient
             .bindToRouterFunction(RouterFunctions.route(GET("/ping"), request -> ServerResponse.ok().bodyValue("pong")))
-            .webFilter(new SecurityHeadersConfig(), new CorsConfig().corsWebFilter(ORIGEN_PERMITIDO))
+            .webFilter(new SecurityHeadersConfig(), new CorsWebFilter(new CorsConfig().corsConfigurationSource(ORIGEN_PERMITIDO)))
             .build();
 
     @Test

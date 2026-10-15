@@ -2,6 +2,7 @@ package com.crediya.solicitudes.config;
 
 import com.crediya.solicitudes.model.cliente.gateways.ClienteGateway;
 import com.crediya.solicitudes.model.common.gateways.TransaccionGateway;
+import com.crediya.solicitudes.model.seguridad.gateways.ContextoSeguridadGateway;
 import com.crediya.solicitudes.model.solicitud.gateways.SolicitudRepository;
 import com.crediya.solicitudes.model.tipoprestamo.gateways.TipoPrestamoRepository;
 import com.crediya.solicitudes.usecase.crearsolicitud.CrearSolicitudUseCase;
@@ -43,6 +44,11 @@ class UseCasesConfigTest {
         @Bean
         SolicitudRepository solicitudRepository() {
             return Mockito.mock(SolicitudRepository.class);
+        }
+
+        @Bean
+        ContextoSeguridadGateway contextoSeguridadGateway() {
+            return Mockito.mock(ContextoSeguridadGateway.class);
         }
 
         @Bean
