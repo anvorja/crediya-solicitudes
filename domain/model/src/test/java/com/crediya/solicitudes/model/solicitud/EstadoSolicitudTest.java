@@ -37,4 +37,26 @@ class EstadoSolicitudTest {
                 .isInstanceOf(DatosSolicitudInvalidosException.class)
                 .hasMessageContaining("estado");
     }
+
+    @ParameterizedTest(name = "{0} -> {1} permitido = {2}")
+    @CsvSource({
+            "PENDIENTE_REVISION,PENDIENTE_REVISION,false", "PENDIENTE_REVISION,REVISION_MANUAL,true",
+            "PENDIENTE_REVISION,APROBADA,true", "PENDIENTE_REVISION,RECHAZADA,true",
+            "REVISION_MANUAL,PENDIENTE_REVISION,false", "REVISION_MANUAL,REVISION_MANUAL,false",
+            "REVISION_MANUAL,APROBADA,true", "REVISION_MANUAL,RECHAZADA,true",
+            "RECHAZADA,PENDIENTE_REVISION,false", "RECHAZADA,REVISION_MANUAL,false",
+            "RECHAZADA,APROBADA,true", "RECHAZADA,RECHAZADA,false",
+            "APROBADA,PENDIENTE_REVISION,false", "APROBADA,REVISION_MANUAL,false",
+            "APROBADA,APROBADA,false", "APROBADA,RECHAZADA,false"})
+    @DisplayName("puedeTransicionarA debe respetar la maquina de estados")
+    void puedeTransicionarA(EstadoSolicitud desde, EstadoSolicitud hasta, boolean permitido) {
+        assertThat(desde.puedeTransicionarA(hasta)).isEqualTo(permitido);
+    }
+
+    @Test
+    @DisplayName("esDecisionFinal solo es verdadero para aprobada y rechazada")
+    void esDecisionFinal() {
+        assertThat(EstadoSolicitud.values()).filteredOn(EstadoSolicitud::esDecisionFinal)
+                .containsExactlyInAnyOrder(EstadoSolicitud.APROBADA, EstadoSolicitud.RECHAZADA);
+    }
 }

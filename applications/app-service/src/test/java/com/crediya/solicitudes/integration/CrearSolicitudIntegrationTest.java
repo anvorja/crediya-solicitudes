@@ -136,6 +136,8 @@ class CrearSolicitudIntegrationTest {
         registro.add("DB_USERNAME", POSTGRES::getUsername);
         registro.add("DB_PASSWORD", POSTGRES::getPassword);
         registro.add("AUTH_SERVICE_URL", () -> AUTENTICACION.url("/").toString());
+        // Estas pruebas no usan colas: se apaga el relevo para que no consulte una base que ya se detuvo
+        registro.add("OUTBOX_ENABLED", () -> "false");
         registro.add("AUTH_JWKS_URI", () -> AUTENTICACION.url("/.well-known/jwks.json").toString());
     }
 

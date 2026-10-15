@@ -47,6 +47,18 @@ public class SolicitudRepositoryAdapter implements SolicitudRepository {
             WHERE s.id_estado = :aprobada AND lower(s.email) IN (:emails)
             """;
 
+    private static final String BUSCAR_POR_ID = "SELECT " + SolicitudRowMapper.COLUMNAS + """
+            FROM solicitud s
+            JOIN tipo_prestamo t ON t.id_tipo_prestamo = s.id_tipo_prestamo
+            WHERE s.id_solicitud = :id
+            """;
+
+    // Optimista: solo cambia si nadie la modifico desde que se leyo
+    private static final String ACTUALIZAR_ESTADO = """
+            UPDATE solicitud SET id_estado = :nuevo, actualizado_en = now()
+            WHERE id_solicitud = :id AND id_estado = :anterior
+            """;
+
     private final DatabaseClient databaseClient;
 
     @Override
@@ -64,6 +76,27 @@ public class SolicitudRepositoryAdapter implements SolicitudRepository {
                 .doOnSubscribe(s -> log.info("Guardando solicitud tipo={} estado={}",
                         solicitud.tipoPrestamo().nombre(), solicitud.estado()))
                 .doOnNext(guardada -> log.info("Solicitud guardada id={}", guardada.id()));
+    }
+
+    @Override
+    public Mono<Solicitud> buscarPorId(UUID id) {
+        return databaseClient.sql(BUSCAR_POR_ID)
+                .bind("id", id)
+                .map((fila, metadatos) -> SolicitudRowMapper.aSolicitud(fila))
+                .one();
+    }
+
+    @Override
+    public Mono<Solicitud> actualizarEstado(Solicitud solicitud, EstadoSolicitud estadoAnterior) {
+        return databaseClient.sql(ACTUALIZAR_ESTADO)
+                .bind("nuevo", EstadoCatalogo.idDe(solicitud.estado()))
+                .bind("id", solicitud.id())
+                .bind("anterior", EstadoCatalogo.idDe(estadoAnterior))
+                .fetch()
+                .rowsUpdated()
+                .filter(filas -> filas > 0)
+                .map(filas -> solicitud)
+                .doOnNext(s -> log.info("Solicitud {} paso de {} a {}", s.id(), estadoAnterior, s.estado()));
     }
 
     @Override

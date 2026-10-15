@@ -2,11 +2,13 @@ package com.crediya.solicitudes.model.solicitud.gateways;
 
 import com.crediya.solicitudes.model.solicitud.Solicitud;
 import com.crediya.solicitudes.model.common.Pagina;
+import com.crediya.solicitudes.model.solicitud.EstadoSolicitud;
 import com.crediya.solicitudes.model.solicitud.queries.FiltroSolicitudes;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.util.Collection;
+import java.util.UUID;
 
 public interface SolicitudRepository {
 
@@ -14,6 +16,14 @@ public interface SolicitudRepository {
      * Inserta la solicitud si no tiene id y devuelve la solicitud persistida con su id.
      */
     Mono<Solicitud> guardar(Solicitud solicitud);
+
+    Mono<Solicitud> buscarPorId(UUID id);
+
+    /**
+     * Cambia el estado solo si la solicitud sigue en {@code estadoAnterior} (control de concurrencia optimista).
+     * Devuelve la solicitud actualizada, o un Mono vacio si otro proceso ya la modifico o no existe.
+     */
+    Mono<Solicitud> actualizarEstado(Solicitud solicitud, EstadoSolicitud estadoAnterior);
 
     /**
      * Pagina de solicitudes que cumplen el filtro, de la mas antigua a la mas reciente (orden de atencion).

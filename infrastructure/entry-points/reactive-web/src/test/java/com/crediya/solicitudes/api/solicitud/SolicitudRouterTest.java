@@ -17,6 +17,11 @@ import com.crediya.solicitudes.model.solicitud.exceptions.DatosSolicitudInvalido
 import com.crediya.solicitudes.model.solicitud.exceptions.MontoFueraDeRangoException;
 import com.crediya.solicitudes.model.solicitud.exceptions.TipoPrestamoNoValidoException;
 import com.crediya.solicitudes.model.tipoprestamo.TipoPrestamo;
+import com.crediya.solicitudes.model.solicitud.commands.ActualizarEstadoSolicitudCommand;
+import com.crediya.solicitudes.model.solicitud.exceptions.SolicitudModificadaException;
+import com.crediya.solicitudes.model.solicitud.exceptions.SolicitudNoEncontradaException;
+import com.crediya.solicitudes.model.solicitud.exceptions.TransicionEstadoInvalidaException;
+import com.crediya.solicitudes.usecase.actualizarestado.ActualizarEstadoSolicitudUseCase;
 import com.crediya.solicitudes.usecase.crearsolicitud.CrearSolicitudUseCase;
 import com.crediya.solicitudes.usecase.listarsolicitudes.ListarSolicitudesUseCase;
 import jakarta.validation.Validation;
@@ -62,11 +67,14 @@ class SolicitudRouterTest {
     @Mock
     private ListarSolicitudesUseCase listarUseCase;
 
+    @Mock
+    private ActualizarEstadoSolicitudUseCase actualizarUseCase;
+
     private WebTestClient client;
 
     @BeforeEach
     void setUp() {
-        var handler = new SolicitudHandler(useCase, listarUseCase, new SolicitudRestMapperImpl(),
+        var handler = new SolicitudHandler(useCase, listarUseCase, actualizarUseCase, new SolicitudRestMapperImpl(),
                 new RequestValidator(Validation.buildDefaultValidatorFactory().getValidator()));
         var errorHandler = new GlobalErrorHandler(new DefaultErrorAttributes(), new WebProperties(),
                 new StaticApplicationContext(), ServerCodecConfigurer.create());
@@ -367,5 +375,68 @@ class SolicitudRouterTest {
 
         client.get().uri(RUTA).exchange()
                 .expectStatus().isForbidden().expectBody().jsonPath("$.codigo").isEqualTo("ACCESO_DENEGADO");
+    }
+
+    private WebTestClient.ResponseSpec put(String cuerpo) {
+        return client.put().uri(RUTA).contentType(MediaType.APPLICATION_JSON).bodyValue(cuerpo).exchange();
+    }
+
+    @Test
+    @DisplayName("PUT: cuando el cuerpo es valido, debe responder 200 con la solicitud en su nuevo estado")
+    void actualizar_debeResponder200() {
+        var id = UUID.randomUUID();
+        when(actualizarUseCase.ejecutar(any())).thenReturn(Mono.just(new Solicitud(id, new BigDecimal("5000000"), 24,
+                "maria@example.com", EstadoSolicitud.APROBADA, PERSONAL)));
+
+        put("{\"id_solicitud\":\"" + id + "\",\"estado\":\"APROBADA\"}")
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.id_solicitud").isEqualTo(id.toString())
+                .jsonPath("$.estado").isEqualTo("APROBADA");
+
+        var comando = ArgumentCaptor.forClass(ActualizarEstadoSolicitudCommand.class);
+        verify(actualizarUseCase).ejecutar(comando.capture());
+        assertThat(comando.getValue().idSolicitud()).isEqualTo(id.toString());
+        assertThat(comando.getValue().estado()).isEqualTo("APROBADA");
+    }
+
+    @Test
+    @DisplayName("PUT: cuando faltan campos, debe responder 400 con el detalle y sin llamar al caso de uso")
+    void actualizar_camposFaltantes_debeResponder400() {
+        put("{}").expectStatus().isBadRequest()
+                .expectBody()
+                .jsonPath("$.codigo").isEqualTo("VALIDACION_FALLIDA")
+                .jsonPath("$.detalles.id_solicitud").isNotEmpty()
+                .jsonPath("$.detalles.estado").isNotEmpty();
+
+        verify(actualizarUseCase, never()).ejecutar(any());
+    }
+
+    @Test
+    @DisplayName("PUT: cuando no hay cuerpo, debe responder 400")
+    void actualizar_sinCuerpo_debeResponder400() {
+        client.put().uri(RUTA).contentType(MediaType.APPLICATION_JSON).exchange().expectStatus().isBadRequest();
+    }
+
+    @Test
+    @DisplayName("PUT: debe traducir los errores del dominio (404, 409, 409, 403, 400)")
+    void actualizar_erroresDeDominio() {
+        var cuerpo = "{\"id_solicitud\":\"" + UUID.randomUUID() + "\",\"estado\":\"APROBADA\"}";
+
+        when(actualizarUseCase.ejecutar(any())).thenReturn(Mono.error(new SolicitudNoEncontradaException()));
+        put(cuerpo).expectStatus().isNotFound().expectBody().jsonPath("$.codigo").isEqualTo("SOLICITUD_NO_ENCONTRADA");
+
+        when(actualizarUseCase.ejecutar(any())).thenReturn(Mono.error(
+                new TransicionEstadoInvalidaException(EstadoSolicitud.APROBADA, EstadoSolicitud.RECHAZADA)));
+        put(cuerpo).expectStatus().isEqualTo(409).expectBody().jsonPath("$.codigo").isEqualTo("TRANSICION_ESTADO_INVALIDA");
+
+        when(actualizarUseCase.ejecutar(any())).thenReturn(Mono.error(new SolicitudModificadaException()));
+        put(cuerpo).expectStatus().isEqualTo(409).expectBody().jsonPath("$.codigo").isEqualTo("SOLICITUD_MODIFICADA");
+
+        when(actualizarUseCase.ejecutar(any())).thenReturn(Mono.error(new AccesoDenegadoException()));
+        put(cuerpo).expectStatus().isForbidden();
+
+        when(actualizarUseCase.ejecutar(any())).thenReturn(Mono.error(new DatosSolicitudInvalidosException("estado", "debe ser APROBADA o RECHAZADA")));
+        put(cuerpo).expectStatus().isBadRequest();
     }
 }

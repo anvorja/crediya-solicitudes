@@ -1,6 +1,7 @@
 package com.crediya.solicitudes.api.documentation;
 
 import com.crediya.solicitudes.api.constants.ApiRoutes;
+import com.crediya.solicitudes.api.dto.request.ActualizarEstadoRequest;
 import com.crediya.solicitudes.api.dto.request.CrearSolicitudRequest;
 import com.crediya.solicitudes.api.dto.response.ErrorResponse;
 import com.crediya.solicitudes.api.dto.response.PaginaResponse;
@@ -31,6 +32,7 @@ public final class SolicitudOpenApi {
     private static final String UNAUTHORIZED = String.valueOf(HttpStatus.UNAUTHORIZED.value());
     private static final String FORBIDDEN = String.valueOf(HttpStatus.FORBIDDEN.value());
     private static final String NOT_FOUND = String.valueOf(HttpStatus.NOT_FOUND.value());
+    private static final String CONFLICT = String.valueOf(HttpStatus.CONFLICT.value());
     private static final String SERVER_ERROR = String.valueOf(HttpStatus.INTERNAL_SERVER_ERROR.value());
     private static final String UNAVAILABLE = String.valueOf(HttpStatus.SERVICE_UNAVAILABLE.value());
 
@@ -68,6 +70,30 @@ public final class SolicitudOpenApi {
                 .response(responseBuilder().responseCode(SERVER_ERROR).description("Error interno")
                         .content(contentBuilder().mediaType(JSON)
                                 .schema(schemaBuilder().implementation(ErrorResponse.class))));
+    }
+
+    public static Builder actualizarEstado(Builder builder) {
+        return builder
+                .operationId("actualizarEstadoSolicitud")
+                .summary("Aprobar o rechazar una solicitud")
+                .description("HU6: un ASESOR decide una solicitud (APROBADA o RECHAZADA). El cambio y el aviso al solicitante se "
+                        + "registran juntos y el correo se envia de forma asincrona. Una solicitud aprobada no puede volver a cambiar.")
+                .tag(TAG)
+                .security(securityRequirementBuilder().name(OpenApiConfig.ESQUEMA_BEARER))
+                .requestBody(requestBodyBuilder().required(true)
+                        .content(contentBuilder().mediaType(JSON).schema(schemaBuilder().implementation(ActualizarEstadoRequest.class))))
+                .response(responseBuilder().responseCode(OK).description("Solicitud con su nuevo estado")
+                        .content(contentBuilder().mediaType(JSON).schema(schemaBuilder().implementation(SolicitudResponse.class))))
+                .response(responseBuilder().responseCode(BAD_REQUEST).description("Identificador o estado invalidos")
+                        .content(contentBuilder().mediaType(JSON).schema(schemaBuilder().implementation(ErrorResponse.class))))
+                .response(responseBuilder().responseCode(UNAUTHORIZED).description("Falta el token o no es valido")
+                        .content(contentBuilder().mediaType(JSON).schema(schemaBuilder().implementation(ErrorResponse.class))))
+                .response(responseBuilder().responseCode(FORBIDDEN).description("Solo un ASESOR puede decidir")
+                        .content(contentBuilder().mediaType(JSON).schema(schemaBuilder().implementation(ErrorResponse.class))))
+                .response(responseBuilder().responseCode(NOT_FOUND).description("La solicitud no existe")
+                        .content(contentBuilder().mediaType(JSON).schema(schemaBuilder().implementation(ErrorResponse.class))))
+                .response(responseBuilder().responseCode(CONFLICT).description("Transicion de estado no permitida o solicitud modificada por otro usuario")
+                        .content(contentBuilder().mediaType(JSON).schema(schemaBuilder().implementation(ErrorResponse.class))));
     }
 
     public static Builder listarSolicitudes(Builder builder) {

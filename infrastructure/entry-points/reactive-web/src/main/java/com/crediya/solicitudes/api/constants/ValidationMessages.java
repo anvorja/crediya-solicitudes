@@ -10,6 +10,8 @@ public final class ValidationMessages {
     public static final String PLAZO_MINIMO = "El plazo debe ser de al menos 1 mes";
     public static final String PLAZO_MAXIMO = "El plazo no puede superar 360 meses";
     public static final String TIPO_PRESTAMO_REQUERIDO = "El tipo de prestamo es obligatorio";
+    public static final String ID_SOLICITUD_REQUERIDO = "El identificador de la solicitud es obligatorio";
+    public static final String ESTADO_REQUERIDO = "El estado es obligatorio";
     public static final String ENTERO_INVALIDO = "Debe ser un numero entero";
     public static final String CUERPO_REQUERIDO = "El cuerpo de la peticion es obligatorio";
     public static final String CAMPO_CUERPO = "cuerpo";
