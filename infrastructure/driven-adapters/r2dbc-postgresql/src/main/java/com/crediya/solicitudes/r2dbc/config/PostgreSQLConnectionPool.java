@@ -5,6 +5,7 @@ import io.r2dbc.pool.ConnectionPool;
 import io.r2dbc.pool.ConnectionPoolConfiguration;
 import io.r2dbc.postgresql.PostgresqlConnectionConfiguration;
 import io.r2dbc.postgresql.PostgresqlConnectionFactory;
+import io.r2dbc.postgresql.client.SSLMode;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -27,6 +28,7 @@ public class PostgreSQLConnectionPool {
                 .schema(properties.schema())
                 .username(properties.username())
                 .password(properties.password())
+                .sslMode(modoSsl(properties.sslMode()))
                 .build();
 
         ConnectionPoolConfiguration poolConfiguration = ConnectionPoolConfiguration.builder()
@@ -40,4 +42,12 @@ public class PostgreSQLConnectionPool {
 
 		return new ConnectionPool(poolConfiguration);
 	}
+
+    /** DB_SSL_MODE: disable (local), require (RDS exige conexion cifrada), verify-ca o verify-full. */
+    static SSLMode modoSsl(String valor) {
+        if (valor == null || valor.isBlank()) {
+            return SSLMode.DISABLE;
+        }
+        return SSLMode.valueOf(valor.trim().toUpperCase().replace('-', '_'));
+    }
 }

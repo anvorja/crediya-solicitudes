@@ -10,7 +10,7 @@ spring:
     timeout-per-shutdown-phase: "20s"
   flyway:
     enabled: true
-    url: "jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:crediya_solicitudes}"
+    url: "jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:crediya_solicitudes}?sslmode=${DB_SSL_MODE:disable}"
     user: "${DB_USERNAME}"
     password: "${DB_PASSWORD}"
     locations: "classpath:db/migration"
@@ -24,6 +24,7 @@ adapters:
     schema: "${DB_SCHEMA:public}"
     username: "${DB_USERNAME}"
     password: "${DB_PASSWORD}"
+    ssl-mode: "${DB_SSL_MODE:disable}"
 adapter:
   restconsumer:
     url: "${AUTH_SERVICE_URL:http://localhost:8081}"
