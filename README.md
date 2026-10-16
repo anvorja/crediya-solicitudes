@@ -220,7 +220,7 @@ rulesets de la rama (no los renombres sin actualizar la ruleset):
 |-----------------------|------------|
 | **Lint** | `hadolint` sobre el Dockerfile, `shellcheck` sobre los scripts, `docker compose config` y `validateStructure` (el dominio no depende de infraestructura) |
 | **Calidad y build** | `./gradlew build jacocoMergedReport`: compila, corre las pruebas unitarias y de integracion (Testcontainers) y exige 90% de cobertura en el dominio; publica los reportes como artefacto y la cobertura en el resumen del job |
-| **Imagen Docker** | Construye la imagen, comprueba que no corra como root y, solo al integrar en `develop`/`main`, la publica en `ghcr.io/<owner>/<repo>` (tags de rama, `sha-<corto>` y `latest` en `main`) |
+| **Imagen Docker** | Construye la imagen, comprueba que no corra como root y, solo al integrar en `develop`/`main`, la publica en Amazon ECR (`crediya/<servicio>`, autenticando con OIDC) con una etiqueta unica `sha-<corto>` |
 
 `develop` solo admite PR con *squash* y `main` solo con *merge*; ambas exigen los tres checks en verde.
 

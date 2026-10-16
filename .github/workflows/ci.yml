@@ -105,7 +105,7 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
-      packages: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
@@ -114,11 +114,10 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }}
+          images: crediya/solicitudes
+          # Los repositorios de ECR son inmutables: solo una etiqueta unica por commit (sin ramas ni latest)
           tags: |
-            type=ref,event=branch
-            type=sha,format=short
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=sha,format=short,prefix=sha-
 
       - name: Construir la imagen
         uses: docker/build-push-action@v6
@@ -136,22 +135,29 @@ jobs:
           echo "uid del proceso: $usuario"
           test "$usuario" != "0"
 
-      # CD: solo al integrar en develop o main (no en PR) se publica la imagen en GitHub Container Registry
-      - name: Iniciar sesion en ghcr.io
+      # CD: solo al integrar en develop o main (no en PR) se publica en Amazon ECR, autenticando con OIDC (sin claves estaticas)
+      - name: Credenciales de AWS (OIDC)
         if: github.event_name == 'push'
-        uses: docker/login-action@v3
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          role-to-assume: arn:aws:iam::874348038487:role/crediya-gha-solicitudes
+          aws-region: us-east-1
 
-      - name: Publicar la imagen
+      - name: Iniciar sesion en ECR
         if: github.event_name == 'push'
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: deployment/Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Publicar la imagen (si la etiqueta no existe ya)
+        if: github.event_name == 'push'
+        env:
+          REPO: crediya/solicitudes
+          ETIQUETA: ${{ steps.meta.outputs.version }}
+          REGISTRO: ${{ steps.ecr.outputs.registry }}
+        run: |
+          if aws ecr describe-images --repository-name "$REPO" --image-ids imageTag="$ETIQUETA" >/dev/null 2>&1; then
+            echo "La etiqueta $ETIQUETA ya existe en ECR (inmutable); no se vuelve a publicar"
+          else
+            docker tag "$REPO:$ETIQUETA" "$REGISTRO/$REPO:$ETIQUETA"
+            docker push "$REGISTRO/$REPO:$ETIQUETA"
+          fi
