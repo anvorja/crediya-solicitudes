@@ -195,6 +195,8 @@ export AUTH_SERVICE_URL=http://localhost:8081 AUTH_JWKS_URI=http://localhost:808
 ./gradlew bootRun
 ```
 
+> Para una base RDS, que exige conexion cifrada, define `DB_SSL_MODE=require`. Por defecto es `disable`, adecuado para el PostgreSQL local del compose. Acepta `disable`, `require`, `verify-ca` y `verify-full`.
+
 Swagger UI: http://localhost:8080/swagger-ui.html - Health: http://localhost:8080/actuator/health
 
 > Si tenias una base de datos de la version anterior (esquema `solicitudes`), recreala: la migracion `V1` se reescribio
