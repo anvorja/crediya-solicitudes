@@ -162,6 +162,7 @@ services:
       AWS_SECRET_ACCESS_KEY: test
       SQS_NOTIFICACIONES_URL: http://localstack:4566/000000000000/crediya-notificaciones
       SQS_VALIDACION_URL: http://localstack:4566/000000000000/crediya-validacion-automatica
+      SQS_REPORTES_URL: http://localstack:4566/000000000000/crediya-solicitud-aprobada
       SQS_DECISION_URL: http://localstack:4566/000000000000/crediya-decision-automatica
     ports:
       - "${SOLICITUDES_PORT:-8080}:8080"

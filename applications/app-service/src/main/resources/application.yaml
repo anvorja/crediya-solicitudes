@@ -38,6 +38,7 @@ adapter:
     colas:
       notificaciones: "${SQS_NOTIFICACIONES_URL:http://localhost:4566/000000000000/crediya-notificaciones}"
       validacion: "${SQS_VALIDACION_URL:http://localhost:4566/000000000000/crediya-validacion-automatica}"
+      reportes: "${SQS_REPORTES_URL:http://localhost:4566/000000000000/crediya-solicitud-aprobada}"
 outbox:
   enabled: "${OUTBOX_ENABLED:true}"
   intervalo: "${OUTBOX_INTERVALO:2s}"

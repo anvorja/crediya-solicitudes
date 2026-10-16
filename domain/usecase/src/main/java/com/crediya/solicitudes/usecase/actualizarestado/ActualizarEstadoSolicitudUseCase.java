@@ -4,6 +4,7 @@ import com.crediya.solicitudes.model.cliente.Cliente;
 import com.crediya.solicitudes.model.cliente.gateways.ClienteGateway;
 import com.crediya.solicitudes.model.common.exceptions.AccesoDenegadoException;
 import com.crediya.solicitudes.model.common.gateways.TransaccionGateway;
+import com.crediya.solicitudes.model.evento.SolicitudAprobada;
 import com.crediya.solicitudes.model.evento.SolicitudDecidida;
 import com.crediya.solicitudes.model.evento.gateways.EventoSalienteRepository;
 import com.crediya.solicitudes.model.seguridad.Rol;
@@ -86,7 +87,14 @@ public class ActualizarEstadoSolicitudUseCase {
                 .switchIfEmpty(Mono.error(SolicitudModificadaException::new))
                 .flatMap(guardada -> eventoSalienteRepository
                         .registrar(new SolicitudDecidida(reloj.instant(), guardada, contexto.nombre(), List.of()))
+                        .then(Mono.defer(() -> registrarAprobacion(guardada)))
                         .thenReturn(guardada)));
+    }
+
+    private Mono<Void> registrarAprobacion(Solicitud guardada) {
+        return guardada.estado() == EstadoSolicitud.APROBADA
+                ? eventoSalienteRepository.registrar(new SolicitudAprobada(reloj.instant(), guardada))
+                : Mono.empty();
     }
 
     private record Decision(UUID id, EstadoSolicitud estado) {

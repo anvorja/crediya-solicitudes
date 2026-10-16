@@ -112,6 +112,7 @@ class ValidacionAutomaticaIntegrationTest {
     private static String colaValidacion;
     private static String colaDecision;
     private static String colaNotificaciones;
+    private static String colaReportes;
     private static String dlqDecision;
 
     @DynamicPropertySource
@@ -124,6 +125,7 @@ class ValidacionAutomaticaIntegrationTest {
                 .build();
         colaValidacion = sqs.createQueue(r -> r.queueName("crediya-validacion-automatica")).join().queueUrl();
         colaNotificaciones = sqs.createQueue(r -> r.queueName("crediya-notificaciones")).join().queueUrl();
+        colaReportes = sqs.createQueue(r -> r.queueName("crediya-solicitud-aprobada")).join().queueUrl();
         dlqDecision = sqs.createQueue(r -> r.queueName("crediya-decision-automatica-dlq")).join().queueUrl();
         String arnDlq = sqs.getQueueAttributes(r -> r.queueUrl(dlqDecision).attributeNamesWithStrings("QueueArn")).join()
                 .attributesAsStrings().get("QueueArn");
@@ -141,6 +143,7 @@ class ValidacionAutomaticaIntegrationTest {
         registro.add("AWS_REGION", LOCALSTACK::getRegion);
         registro.add("AWS_ENDPOINT_URL", () -> LOCALSTACK.getEndpoint().toString());
         registro.add("SQS_NOTIFICACIONES_URL", () -> colaNotificaciones);
+        registro.add("SQS_REPORTES_URL", () -> colaReportes);
         registro.add("SQS_VALIDACION_URL", () -> colaValidacion);
         registro.add("SQS_DECISION_URL", () -> colaDecision);
         registro.add("OUTBOX_INTERVALO", () -> "300ms");
@@ -164,7 +167,7 @@ class ValidacionAutomaticaIntegrationTest {
     void limpiar() {
         db.sql("TRUNCATE TABLE solicitud").then().block();
         db.sql("TRUNCATE TABLE evento_saliente").then().block();
-        for (String cola : List.of(colaValidacion, colaNotificaciones, dlqDecision)) {
+        for (String cola : List.of(colaValidacion, colaNotificaciones, colaReportes, dlqDecision)) {
             sqs.purgeQueue(r -> r.queueUrl(cola)).join();
         }
     }

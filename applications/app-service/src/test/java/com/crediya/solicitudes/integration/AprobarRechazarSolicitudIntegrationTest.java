@@ -66,6 +66,7 @@ class AprobarRechazarSolicitudIntegrationTest {
 
     private static final String RUTA = "/api/v1/solicitud";
     private static final String COLA = "crediya-notificaciones";
+    private static final String COLA_REPORTES = "crediya-solicitud-aprobada";
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final String JSON_MARIA = """
             {"id":"6f1c1c52-1d5e-4a45-9b52-8b1f3f1a0a11","nombres":"Maria","apellidos":"Gomez",
@@ -118,6 +119,7 @@ class AprobarRechazarSolicitudIntegrationTest {
 
     private static SqsAsyncClient sqs;
     private static String urlCola;
+    private static String urlColaReportes;
 
     @DynamicPropertySource
     static void propiedades(DynamicPropertyRegistry registro) {
@@ -129,6 +131,7 @@ class AprobarRechazarSolicitudIntegrationTest {
                         AwsBasicCredentials.create(LOCALSTACK.getAccessKey(), LOCALSTACK.getSecretKey())))
                 .build();
         urlCola = sqs.createQueue(r -> r.queueName(COLA)).join().queueUrl();
+        urlColaReportes = sqs.createQueue(r -> r.queueName(COLA_REPORTES)).join().queueUrl();
 
         registro.add("DB_HOST", POSTGRES::getHost);
         registro.add("DB_PORT", () -> POSTGRES.getMappedPort(PostgreSQLContainer.POSTGRESQL_PORT));
@@ -140,6 +143,7 @@ class AprobarRechazarSolicitudIntegrationTest {
         registro.add("AWS_REGION", LOCALSTACK::getRegion);
         registro.add("AWS_ENDPOINT_URL", () -> LOCALSTACK.getEndpoint().toString());
         registro.add("SQS_NOTIFICACIONES_URL", () -> urlCola);
+        registro.add("SQS_REPORTES_URL", () -> urlColaReportes);
         registro.add("OUTBOX_INTERVALO", () -> "300ms");
         // La cola de decisiones no se usa en estas pruebas
         registro.add("SQS_LISTENER_ENABLED", () -> "false");
@@ -168,6 +172,7 @@ class AprobarRechazarSolicitudIntegrationTest {
 
     private static void vaciarCola() {
         sqs.purgeQueue(r -> r.queueUrl(urlCola)).join();
+        sqs.purgeQueue(r -> r.queueUrl(urlColaReportes)).join();
     }
 
     private static String token(String rol) {
@@ -238,6 +243,15 @@ class AprobarRechazarSolicitudIntegrationTest {
         assertThat(evento.at("/solicitud/estado").asText()).isEqualTo("APROBADA");
         assertThat(evento.at("/solicitud/tipo_prestamo").asText()).isEqualTo("PERSONAL");
         org.awaitility.Awaitility.await().atMost(Duration.ofSeconds(5)).until(() -> eventosPendientes() == 0);
+        // Al aprobar tambien se avisa a reportes, con lo minimo para contar
+        var avisos = sqs.receiveMessage(ReceiveMessageRequest.builder().queueUrl(urlColaReportes).waitTimeSeconds(10).maxNumberOfMessages(10).build())
+                .join().messages();
+        assertThat(avisos).hasSize(1);
+        JsonNode aviso = JSON.readTree(avisos.get(0).body());
+        assertThat(aviso.get("tipo").asText()).isEqualTo("SOLICITUD_APROBADA");
+        assertThat(aviso.get("id_evento").asText()).isNotBlank();
+        assertThat(aviso.at("/solicitud/id_solicitud").asText()).isEqualTo(id.toString());
+        assertThat(avisos.get(0).body()).doesNotContain("maria@example.com");
     }
 
     @Test
@@ -310,8 +324,8 @@ class AprobarRechazarSolicitudIntegrationTest {
 
         assertThat(estadoEnBd(id)).isEqualTo("APROBADA");
         org.awaitility.Awaitility.await().atMost(Duration.ofSeconds(10)).until(() ->
-                db.sql("SELECT intentos FROM evento_saliente WHERE enviado_en IS NULL").map((f, m) -> f.get("intentos", Integer.class)).one().block() >= 1);
-        assertThat(db.sql("SELECT ultimo_error FROM evento_saliente").map((f, m) -> f.get("ultimo_error", String.class)).one().block()).isNotBlank();
+                db.sql("SELECT intentos FROM evento_saliente WHERE enviado_en IS NULL AND destino = 'NOTIFICACIONES'").map((f, m) -> f.get("intentos", Integer.class)).one().block() >= 1);
+        assertThat(db.sql("SELECT ultimo_error FROM evento_saliente WHERE enviado_en IS NULL AND destino = 'NOTIFICACIONES'").map((f, m) -> f.get("ultimo_error", String.class)).one().block()).isNotBlank();
 
         sqs.createQueue(r -> r.queueName(COLA)).join();
 

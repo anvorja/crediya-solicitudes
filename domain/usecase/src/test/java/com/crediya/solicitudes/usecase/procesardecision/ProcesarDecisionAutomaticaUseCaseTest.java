@@ -1,6 +1,8 @@
 package com.crediya.solicitudes.usecase.procesardecision;
 
 import com.crediya.solicitudes.model.common.gateways.TransaccionGateway;
+import com.crediya.solicitudes.model.evento.EventoDeDominio;
+import com.crediya.solicitudes.model.evento.SolicitudAprobada;
 import com.crediya.solicitudes.model.evento.SolicitudDecidida;
 import com.crediya.solicitudes.model.evento.gateways.EventoSalienteRepository;
 import com.crediya.solicitudes.model.solicitud.CuotaPlanDePago;
@@ -34,6 +36,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -88,12 +91,19 @@ class ProcesarDecisionAutomaticaUseCaseTest {
 
         StepVerifier.create(useCase.ejecutar(decision(estado))).expectNext(nueva).verifyComplete();
 
-        var evento = ArgumentCaptor.forClass(SolicitudDecidida.class);
-        verify(eventoSalienteRepository).registrar(evento.capture());
-        assertThat(evento.getValue().solicitud()).isEqualTo(nueva);
-        assertThat(evento.getValue().nombreCliente()).isEqualTo("Maria Gomez");
-        assertThat(evento.getValue().planDePago()).isEqualTo(PLAN);
-        assertThat(evento.getValue().ocurridoEn()).isEqualTo(AHORA);
+        boolean aprobada = estado.equals("APROBADA");
+        var eventos = ArgumentCaptor.forClass(EventoDeDominio.class);
+        verify(eventoSalienteRepository, times(aprobada ? 2 : 1)).registrar(eventos.capture());
+        var decidida = (SolicitudDecidida) eventos.getAllValues().get(0);
+        assertThat(decidida.solicitud()).isEqualTo(nueva);
+        assertThat(decidida.nombreCliente()).isEqualTo("Maria Gomez");
+        assertThat(decidida.planDePago()).isEqualTo(PLAN);
+        assertThat(decidida.ocurridoEn()).isEqualTo(AHORA);
+        if (aprobada) {
+            var avisoReportes = (SolicitudAprobada) eventos.getAllValues().get(1);
+            assertThat(avisoReportes.solicitud()).isEqualTo(nueva);
+            assertThat(avisoReportes.ocurridoEn()).isEqualTo(AHORA);
+        }
     }
 
     @Test

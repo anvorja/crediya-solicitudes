@@ -84,6 +84,11 @@ solicitante, `nombre` y `salario_base` salen nulos pero la solicitud sigue apare
 Errores: `404 SOLICITUD_NO_ENCONTRADA`, `409 TRANSICION_ESTADO_INVALIDA`, `409 SOLICITUD_MODIFICADA` (otro asesor decidio al mismo
 tiempo: el `UPDATE` solo aplica si el estado sigue siendo el que se leyo), `400` si el estado no es `APROBADA`/`RECHAZADA`.
 
+**Aviso a reportes.** Cuando una solicitud queda `APROBADA` (por decision automatica o de un asesor) se registra, en la misma
+transaccion y por el mismo outbox, un segundo evento `SOLICITUD_APROBADA` con destino `REPORTES`. Lleva solo `id_solicitud`, `monto`,
+`plazo` y `tipo_prestamo` (sin datos personales) y se publica en la cola `crediya-solicitud-aprobada` (`SQS_REPORTES_URL`), de donde
+lo consume el servicio `crediya-reportes`.
+
 **Como llega el correo sin perder avisos (outbox).** El cambio de estado y el evento `SOLICITUD_DECIDIDA` se guardan en la misma
 transaccion (tabla `evento_saliente`); un relevo (`OutboxRelay`, cada `OUTBOX_INTERVALO`, `OUTBOX_LOTE` por ronda) los publica en la
 cola `crediya-notificaciones`, de donde los lee la Lambda `lambda-notificaciones`, que publica el correo en el topico SNS

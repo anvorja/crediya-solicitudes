@@ -5,5 +5,6 @@ package com.crediya.solicitudes.model.evento;
  */
 public enum Destino {
     NOTIFICACIONES,
-    VALIDACION
+    VALIDACION,
+    REPORTES
 }

@@ -56,4 +56,14 @@ class SolicitudDecididaTest {
         assertThat(saliente.intentos()).isEqualTo(2);
         assertThat(Destino.valueOf("NOTIFICACIONES")).isSameAs(Destino.NOTIFICACIONES);
     }
+
+    @Test
+    @DisplayName("SolicitudAprobada lleva la solicitud y el instante, y su destino es REPORTES")
+    void solicitudAprobada() {
+        var evento = new SolicitudAprobada(Instant.EPOCH, SOLICITUD);
+
+        assertThat(evento.solicitud()).isEqualTo(SOLICITUD);
+        assertThat(evento.ocurridoEn()).isEqualTo(Instant.EPOCH);
+        assertThat(Destino.valueOf("REPORTES")).isSameAs(Destino.REPORTES);
+    }
 }

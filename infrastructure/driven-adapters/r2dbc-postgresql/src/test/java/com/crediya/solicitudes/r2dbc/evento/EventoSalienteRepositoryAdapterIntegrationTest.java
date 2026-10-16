@@ -198,4 +198,27 @@ class EventoSalienteRepositoryAdapterIntegrationTest {
         assertThat(json.at("/prestamos_aprobados/0/plazo").asInt()).isEqualTo(12);
         assertThat(json.at("/prestamos_aprobados/0/tasa_interes").decimalValue()).isEqualByComparingTo("0.022");
     }
+
+    @Test
+    @DisplayName("la aprobacion va a la cola de reportes con el contrato minimo, sin datos personales")
+    void solicitudAprobada_contrato() throws Exception {
+        var solicitud = new Solicitud(UUID.randomUUID(), new BigDecimal("5000000.00"), 24, "maria@example.com",
+                EstadoSolicitud.APROBADA, PERSONAL);
+        outbox.registrar(new com.crediya.solicitudes.model.evento.SolicitudAprobada(
+                Instant.parse("2026-10-15T10:00:00Z"), solicitud)).block();
+
+        var guardado = outbox.tomarPendientes(1).blockFirst();
+
+        assertThat(guardado.destino()).isEqualTo(Destino.REPORTES);
+        JsonNode json = JSON.readTree(guardado.payload());
+        assertThat(json.get("id_evento").asText()).isEqualTo(guardado.id().toString());
+        assertThat(json.get("version").asInt()).isEqualTo(1);
+        assertThat(json.get("tipo").asText()).isEqualTo("SOLICITUD_APROBADA");
+        assertThat(json.get("ocurrido_en").asText()).isEqualTo("2026-10-15T10:00:00Z");
+        assertThat(json.at("/solicitud/id_solicitud").asText()).isEqualTo(solicitud.id().toString());
+        assertThat(json.at("/solicitud/monto").decimalValue()).isEqualByComparingTo("5000000");
+        assertThat(json.at("/solicitud/plazo").asInt()).isEqualTo(24);
+        assertThat(json.at("/solicitud/tipo_prestamo").asText()).isEqualTo("PERSONAL");
+        assertThat(guardado.payload()).doesNotContain("maria@example.com");
+    }
 }
