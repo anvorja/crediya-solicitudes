@@ -5,6 +5,8 @@ import com.crediya.solicitudes.model.cliente.exceptions.ServicioNoDisponibleExce
 import com.crediya.solicitudes.model.cliente.gateways.ClienteGateway;
 import com.crediya.solicitudes.model.common.exceptions.AccesoDenegadoException;
 import com.crediya.solicitudes.model.common.gateways.TransaccionGateway;
+import com.crediya.solicitudes.model.evento.EventoDeDominio;
+import com.crediya.solicitudes.model.evento.SolicitudAprobada;
 import com.crediya.solicitudes.model.evento.SolicitudDecidida;
 import com.crediya.solicitudes.model.evento.gateways.EventoSalienteRepository;
 import com.crediya.solicitudes.model.seguridad.Rol;
@@ -43,6 +45,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -109,12 +112,16 @@ class ActualizarEstadoSolicitudUseCaseTest {
                 .expectNext(aprobada)
                 .verifyComplete();
 
-        var evento = ArgumentCaptor.forClass(SolicitudDecidida.class);
-        verify(eventoSalienteRepository).registrar(evento.capture());
-        assertThat(evento.getValue().solicitud()).isEqualTo(aprobada);
-        assertThat(evento.getValue().nombreCliente()).isEqualTo("Maria Gomez");
-        assertThat(evento.getValue().ocurridoEn()).isEqualTo(AHORA);
-        assertThat(evento.getValue().planDePago()).isEmpty();
+        var eventos = ArgumentCaptor.forClass(EventoDeDominio.class);
+        verify(eventoSalienteRepository, times(2)).registrar(eventos.capture());
+        var decidida = (SolicitudDecidida) eventos.getAllValues().get(0);
+        assertThat(decidida.solicitud()).isEqualTo(aprobada);
+        assertThat(decidida.nombreCliente()).isEqualTo("Maria Gomez");
+        assertThat(decidida.ocurridoEn()).isEqualTo(AHORA);
+        assertThat(decidida.planDePago()).isEmpty();
+        var avisoReportes = (SolicitudAprobada) eventos.getAllValues().get(1);
+        assertThat(avisoReportes.solicitud()).isEqualTo(aprobada);
+        assertThat(avisoReportes.ocurridoEn()).isEqualTo(AHORA);
         verify(transaccionGateway).ejecutar(any());
     }
 

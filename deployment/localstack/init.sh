@@ -48,6 +48,7 @@ conectar_cola() {
 crear_cola_con_dlq crediya-notificaciones
 crear_cola_con_dlq crediya-validacion-automatica
 crear_cola_con_dlq crediya-decision-automatica
+crear_cola_con_dlq crediya-solicitud-aprobada
 
 TOPIC_ARN=$($AWS sns create-topic --name crediya-correos --query TopicArn --output text)
 $AWS sqs create-queue --queue-name crediya-correos-buzon >/dev/null

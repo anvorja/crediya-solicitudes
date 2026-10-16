@@ -1,6 +1,7 @@
 package com.crediya.solicitudes.usecase.procesardecision;
 
 import com.crediya.solicitudes.model.common.gateways.TransaccionGateway;
+import com.crediya.solicitudes.model.evento.SolicitudAprobada;
 import com.crediya.solicitudes.model.evento.SolicitudDecidida;
 import com.crediya.solicitudes.model.evento.gateways.EventoSalienteRepository;
 import com.crediya.solicitudes.model.solicitud.EstadoSolicitud;
@@ -62,7 +63,14 @@ public class ProcesarDecisionAutomaticaUseCase {
         }
         return eventoSalienteRepository
                 .registrar(new SolicitudDecidida(reloj.instant(), guardada, comando.nombreCliente(), comando.planDePago()))
+                .then(Mono.defer(() -> registrarAprobacion(guardada)))
                 .thenReturn(guardada);
+    }
+
+    private Mono<Void> registrarAprobacion(Solicitud guardada) {
+        return guardada.estado() == EstadoSolicitud.APROBADA
+                ? eventoSalienteRepository.registrar(new SolicitudAprobada(reloj.instant(), guardada))
+                : Mono.empty();
     }
 
     private static UUID identificador(String texto) {
