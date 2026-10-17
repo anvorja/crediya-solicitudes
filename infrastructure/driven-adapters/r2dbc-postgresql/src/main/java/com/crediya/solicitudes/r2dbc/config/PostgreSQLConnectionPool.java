@@ -21,15 +21,19 @@ public class PostgreSQLConnectionPool {
 
 	@Bean
 	public ConnectionPool getConnectionConfig(PostgresqlConnectionProperties properties) {
-		PostgresqlConnectionConfiguration dbConfiguration = PostgresqlConnectionConfiguration.builder()
+		SSLMode sslMode = modoSsl(properties.sslMode());
+		PostgresqlConnectionConfiguration.Builder dbBuilder = PostgresqlConnectionConfiguration.builder()
                 .host(properties.host())
                 .port(properties.port())
                 .database(properties.database())
                 .schema(properties.schema())
                 .username(properties.username())
                 .password(properties.password())
-                .sslMode(modoSsl(properties.sslMode()))
-                .build();
+                .sslMode(sslMode);
+        if (verificaCertificado(sslMode) && properties.sslRootCert() != null && !properties.sslRootCert().isBlank()) {
+            dbBuilder.sslRootCert(properties.sslRootCert());
+        }
+        PostgresqlConnectionConfiguration dbConfiguration = dbBuilder.build();
 
         ConnectionPoolConfiguration poolConfiguration = ConnectionPoolConfiguration.builder()
                 .connectionFactory(new PostgresqlConnectionFactory(dbConfiguration))
@@ -42,6 +46,11 @@ public class PostgreSQLConnectionPool {
 
 		return new ConnectionPool(poolConfiguration);
 	}
+
+    /** Solo los modos verify-* comprueban la CA: ahi se usa DB_SSL_ROOT_CERT (paquete de CA de RDS). */
+    static boolean verificaCertificado(SSLMode modo) {
+        return modo == SSLMode.VERIFY_CA || modo == SSLMode.VERIFY_FULL;
+    }
 
     /** DB_SSL_MODE: disable (local), require (RDS exige conexion cifrada), verify-ca o verify-full. */
     static SSLMode modoSsl(String valor) {
