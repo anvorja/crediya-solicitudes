@@ -40,17 +40,12 @@ public final class SolicitudOpenApi {
     }
 
     public static Builder crearSolicitud(Builder builder) {
-        return builder
+        return protegida(builder, "El rol no es CLIENTE o el documento no es el del usuario autenticado")
                 .operationId("crearSolicitud")
                 .summary("Registrar una solicitud de prestamo")
                 .description("HU2 + HU3: registra la solicitud en estado 'Pendiente de revision' validando que el cliente exista "
                         + "y que el tipo de prestamo sea uno de los existentes. Solo un CLIENTE puede crearla y unicamente a su nombre.")
                 .tag(TAG)
-                .security(securityRequirementBuilder().name(OpenApiConfig.ESQUEMA_BEARER))
-                .response(responseBuilder().responseCode(UNAUTHORIZED).description("Falta el token o no es valido")
-                        .content(contentBuilder().mediaType(JSON).schema(schemaBuilder().implementation(ErrorResponse.class))))
-                .response(responseBuilder().responseCode(FORBIDDEN).description("El rol no es CLIENTE o el documento no es el del usuario autenticado")
-                        .content(contentBuilder().mediaType(JSON).schema(schemaBuilder().implementation(ErrorResponse.class))))
                 .requestBody(requestBodyBuilder()
                         .required(true)
                         .content(contentBuilder().mediaType(JSON)
@@ -58,53 +53,36 @@ public final class SolicitudOpenApi {
                 .response(responseBuilder().responseCode(CREATED).description("Solicitud registrada")
                         .content(contentBuilder().mediaType(JSON)
                                 .schema(schemaBuilder().implementation(SolicitudResponse.class))))
-                .response(responseBuilder().responseCode(BAD_REQUEST).description("Datos invalidos, tipo de prestamo inexistente o monto fuera de rango")
-                        .content(contentBuilder().mediaType(JSON)
-                                .schema(schemaBuilder().implementation(ErrorResponse.class))))
-                .response(responseBuilder().responseCode(NOT_FOUND).description("El cliente no esta registrado")
-                        .content(contentBuilder().mediaType(JSON)
-                                .schema(schemaBuilder().implementation(ErrorResponse.class))))
-                .response(responseBuilder().responseCode(UNAVAILABLE).description("El servicio de autenticacion no responde")
-                        .content(contentBuilder().mediaType(JSON)
-                                .schema(schemaBuilder().implementation(ErrorResponse.class))))
-                .response(responseBuilder().responseCode(SERVER_ERROR).description("Error interno")
-                        .content(contentBuilder().mediaType(JSON)
-                                .schema(schemaBuilder().implementation(ErrorResponse.class))));
+                .response(error(BAD_REQUEST, "Datos invalidos, tipo de prestamo inexistente o monto fuera de rango"))
+                .response(error(NOT_FOUND, "El cliente no esta registrado"))
+                .response(error(UNAVAILABLE, "El servicio de autenticacion no responde"))
+                .response(error(SERVER_ERROR, "Error interno"));
     }
 
     public static Builder actualizarEstado(Builder builder) {
-        return builder
+        return protegida(builder, "Solo un ASESOR puede decidir")
                 .operationId("actualizarEstadoSolicitud")
                 .summary("Aprobar o rechazar una solicitud")
                 .description("HU6: un ASESOR decide una solicitud (APROBADA o RECHAZADA). El cambio y el aviso al solicitante se "
                         + "registran juntos y el correo se envia de forma asincrona. Una solicitud aprobada no puede volver a cambiar.")
                 .tag(TAG)
-                .security(securityRequirementBuilder().name(OpenApiConfig.ESQUEMA_BEARER))
                 .requestBody(requestBodyBuilder().required(true)
                         .content(contentBuilder().mediaType(JSON).schema(schemaBuilder().implementation(ActualizarEstadoRequest.class))))
                 .response(responseBuilder().responseCode(OK).description("Solicitud con su nuevo estado")
                         .content(contentBuilder().mediaType(JSON).schema(schemaBuilder().implementation(SolicitudResponse.class))))
-                .response(responseBuilder().responseCode(BAD_REQUEST).description("Identificador o estado invalidos")
-                        .content(contentBuilder().mediaType(JSON).schema(schemaBuilder().implementation(ErrorResponse.class))))
-                .response(responseBuilder().responseCode(UNAUTHORIZED).description("Falta el token o no es valido")
-                        .content(contentBuilder().mediaType(JSON).schema(schemaBuilder().implementation(ErrorResponse.class))))
-                .response(responseBuilder().responseCode(FORBIDDEN).description("Solo un ASESOR puede decidir")
-                        .content(contentBuilder().mediaType(JSON).schema(schemaBuilder().implementation(ErrorResponse.class))))
-                .response(responseBuilder().responseCode(NOT_FOUND).description("La solicitud no existe")
-                        .content(contentBuilder().mediaType(JSON).schema(schemaBuilder().implementation(ErrorResponse.class))))
-                .response(responseBuilder().responseCode(CONFLICT).description("Transicion de estado no permitida o solicitud modificada por otro usuario")
-                        .content(contentBuilder().mediaType(JSON).schema(schemaBuilder().implementation(ErrorResponse.class))));
+                .response(error(BAD_REQUEST, "Identificador o estado invalidos"))
+                .response(error(NOT_FOUND, "La solicitud no existe"))
+                .response(error(CONFLICT, "Transicion de estado no permitida o solicitud modificada por otro usuario"));
     }
 
     public static Builder listarSolicitudes(Builder builder) {
-        return builder
+        return protegida(builder, "Solo un ASESOR puede listar")
                 .operationId("listarSolicitudes")
                 .summary("Listar solicitudes para revision manual")
                 .description("HU4: lista paginada y filtrable de las solicitudes que necesitan la decision de un asesor "
                         + "(Pendiente de revision, Revision manual y Rechazada), de la mas antigua a la mas reciente. Incluye "
                         + "nombre y salario del solicitante y la deuda mensual de sus prestamos aprobados. Solo ASESOR.")
                 .tag(TAG)
-                .security(securityRequirementBuilder().name(OpenApiConfig.ESQUEMA_BEARER))
                 .parameter(parameterBuilder().name(ApiRoutes.PARAM_ESTADO).in(ParameterIn.QUERY)
                         .description("Estados a incluir, repetidos o separados por coma. Por defecto los tres de revision.")
                         .example("PENDIENTE_REVISION,RECHAZADA").schema(schemaBuilder().implementation(String.class)))
@@ -116,11 +94,24 @@ public final class SolicitudOpenApi {
                         .description("Elementos por pagina, de 1 a 50 (10 por defecto)").example("10").schema(schemaBuilder().implementation(Integer.class)))
                 .response(responseBuilder().responseCode(OK).description("Pagina de solicitudes")
                         .content(contentBuilder().mediaType(JSON).schema(schemaBuilder().implementation(PaginaResponse.class))))
-                .response(responseBuilder().responseCode(BAD_REQUEST).description("Filtro, pagina o tamano invalidos")
-                        .content(contentBuilder().mediaType(JSON).schema(schemaBuilder().implementation(ErrorResponse.class))))
-                .response(responseBuilder().responseCode(UNAUTHORIZED).description("Falta el token o no es valido")
-                        .content(contentBuilder().mediaType(JSON).schema(schemaBuilder().implementation(ErrorResponse.class))))
-                .response(responseBuilder().responseCode(FORBIDDEN).description("Solo un ASESOR puede listar")
-                        .content(contentBuilder().mediaType(JSON).schema(schemaBuilder().implementation(ErrorResponse.class))));
+                .response(error(BAD_REQUEST, "Filtro, pagina o tamano invalidos"));
+    }
+
+    /**
+     * Esquema Bearer mas los 401 y 403 que puede devolver cualquier endpoint protegido.
+     */
+    private static Builder protegida(Builder builder, String descripcionForbidden) {
+        return builder
+                .security(securityRequirementBuilder().name(OpenApiConfig.ESQUEMA_BEARER))
+                .response(error(UNAUTHORIZED, "Falta el token o no es valido"))
+                .response(error(FORBIDDEN, descripcionForbidden));
+    }
+
+    /**
+     * Un unico lugar arma las respuestas de error, siempre con el cuerpo real {@link ErrorResponse}.
+     */
+    private static org.springdoc.core.fn.builders.apiresponse.Builder error(String codigo, String descripcion) {
+        return responseBuilder().responseCode(codigo).description(descripcion)
+                .content(contentBuilder().mediaType(JSON).schema(schemaBuilder().implementation(ErrorResponse.class)));
     }
 }
