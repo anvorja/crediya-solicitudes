@@ -1,0 +1,89 @@
+server:
+  port: "${SERVER_PORT:8080}"
+  shutdown: "graceful"
+spring:
+  application:
+    name: "MicroservicioSolicitudes"
+  devtools:
+    add-properties: false
+  lifecycle:
+    timeout-per-shutdown-phase: "20s"
+  flyway:
+    enabled: true
+    url: "jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:crediya_solicitudes}?sslmode=${DB_SSL_MODE:disable}"
+    user: "${DB_USERNAME}"
+    password: "${DB_PASSWORD}"
+    locations: "classpath:db/migration"
+    validate-on-migrate: true
+    clean-disabled: true
+adapters:
+  r2dbc:
+    host: "${DB_HOST:localhost}"
+    port: "${DB_PORT:5432}"
+    database: "${DB_NAME:crediya_solicitudes}"
+    schema: "${DB_SCHEMA:public}"
+    username: "${DB_USERNAME}"
+    password: "${DB_PASSWORD}"
+    ssl-mode: "${DB_SSL_MODE:disable}"
+adapter:
+  restconsumer:
+    url: "${AUTH_SERVICE_URL:http://localhost:8081}"
+    timeout: "${AUTH_SERVICE_TIMEOUT_MS:3000}"
+    max-retries: 2
+    retry-backoff-ms: 100
+  sqs:
+    region: "${AWS_REGION:us-east-1}"
+    # Solo para LocalStack; en AWS se deja vacio (las credenciales vienen del rol de la tarea o de variables de entorno)
+    endpoint: "${AWS_ENDPOINT_URL:}"
+    colas:
+      notificaciones: "${SQS_NOTIFICACIONES_URL:http://localhost:4566/000000000000/crediya-notificaciones}"
+      validacion: "${SQS_VALIDACION_URL:http://localhost:4566/000000000000/crediya-validacion-automatica}"
+      reportes: "${SQS_REPORTES_URL:http://localhost:4566/000000000000/crediya-solicitud-aprobada}"
+outbox:
+  enabled: "${OUTBOX_ENABLED:true}"
+  intervalo: "${OUTBOX_INTERVALO:2s}"
+  lote: "${OUTBOX_LOTE:20}"
+security:
+  jwt:
+    jwk-set-uri: "${AUTH_JWKS_URI:http://localhost:8081/.well-known/jwks.json}"
+    issuer: "${JWT_ISSUER:crediya-auth}"
+    audience: "${JWT_AUDIENCE:crediya}"
+resilience4j:
+  circuitbreaker:
+    instances:
+      clienteGateway:
+        registerHealthIndicator: true
+        slidingWindowType: "COUNT_BASED"
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        failureRateThreshold: 50
+        waitDurationInOpenState: "10s"
+        permittedNumberOfCallsInHalfOpenState: 3
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "health,prometheus"
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  health:
+    circuitbreakers:
+      enabled: true
+springdoc:
+  swagger-ui:
+    path: "/swagger-ui.html"
+  api-docs:
+    path: "/v3/api-docs"
+cors:
+  allowed-origins: "http://localhost:4200,http://localhost:8080"
+entrypoint:
+  sqs:
+    enabled: "${SQS_LISTENER_ENABLED:true}"
+    queueUrl: "${SQS_DECISION_URL:http://localhost:4566/000000000000/crediya-decision-automatica}"
+    waitTimeSeconds: 20
+    maxNumberOfMessages: 10
+    # Mayor que lo que tarda procesar un mensaje; si se vence, el mensaje vuelve a la cola
+    visibilityTimeoutSeconds: 60
+    numberOfThreads: 1

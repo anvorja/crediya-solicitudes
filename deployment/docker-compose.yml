@@ -1,0 +1,196 @@
+# Aplicacion completa de CrediYa en local: SOLICITUDES llamando a AUTENTICACION, cada uno con su base de datos.
+# Los servicios se hablan por el nombre del servicio de compose (http://autenticacion:8080), no por localhost.
+#
+# Uso (desde la raiz de este repositorio, con microservicio-autenticacion clonado al lado):
+#   ./scripts/init-env.sh && docker compose --env-file .env -f deployment/docker-compose.yml up --build
+#
+# Si el repositorio de autenticacion esta en otra ruta: AUTH_REPO_PATH=/ruta/a/microservicio-autenticacion
+# Las Lambdas se compilan desde sus repositorios: NOTIFICACIONES_REPO_PATH (../../lambda-notificaciones) y
+# CAPACIDAD_REPO_PATH (../../lambda-capacidad-endeudamiento).
+#
+# AWS en local: LocalStack emula SQS, SNS y Lambda. Las credenciales "test" son ficticias y solo valen contra LocalStack.
+# Ver el correo "enviado": docker compose -f deployment/docker-compose.yml exec aws-init \
+#   aws --endpoint-url http://localstack:4566 sqs receive-message --queue-url http://localstack:4566/000000000000/crediya-correos-buzon
+name: crediya
+
+services:
+  db-autenticacion:
+    image: postgres:16.15-alpine
+    environment:
+      POSTGRES_DB: crediya_auth
+      POSTGRES_USER: ${AUTH_DB_USERNAME:?Define AUTH_DB_USERNAME (ver .env.example)}
+      POSTGRES_PASSWORD: ${AUTH_DB_PASSWORD:?Define AUTH_DB_PASSWORD (ver .env.example)}
+    volumes:
+      - db-autenticacion-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [crediya-net]
+    restart: unless-stopped
+
+  db-solicitudes:
+    image: postgres:16.15-alpine
+    environment:
+      POSTGRES_DB: crediya_solicitudes
+      POSTGRES_USER: ${SOLICITUDES_DB_USERNAME:?Define SOLICITUDES_DB_USERNAME (ver .env.example)}
+      POSTGRES_PASSWORD: ${SOLICITUDES_DB_PASSWORD:?Define SOLICITUDES_DB_PASSWORD (ver .env.example)}
+    volumes:
+      - db-solicitudes-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [crediya-net]
+    restart: unless-stopped
+
+  autenticacion:
+    build:
+      context: ${AUTH_REPO_PATH:-../../microservicio-autenticacion}
+      dockerfile: deployment/Dockerfile
+    image: crediya/autenticacion:local
+    environment:
+      DB_HOST: db-autenticacion
+      DB_PORT: 5432
+      DB_NAME: crediya_auth
+      DB_USERNAME: ${AUTH_DB_USERNAME:?Define AUTH_DB_USERNAME (ver .env.example)}
+      DB_PASSWORD: ${AUTH_DB_PASSWORD:?Define AUTH_DB_PASSWORD (ver .env.example)}
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:?Define JWT_PRIVATE_KEY (./scripts/generate-jwt-key.sh)}
+      JWT_TTL_MINUTES: ${JWT_TTL_MINUTES:-60}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@crediya.local}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:?Define BOOTSTRAP_ADMIN_PASSWORD (ver .env.example)}
+      BOOTSTRAP_ADMIN_DOCUMENTO: ${BOOTSTRAP_ADMIN_DOCUMENTO:-0000000001}
+    ports:
+      - "${AUTH_PORT:-8081}:8080"
+    depends_on:
+      db-autenticacion:
+        condition: service_healthy
+    networks: [crediya-net]
+    restart: unless-stopped
+    stop_grace_period: 30s
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 768m
+
+  localstack:
+    # Se fija 4.9.2: las versiones "latest" posteriores exigen un LOCALSTACK_AUTH_TOKEN
+    image: localstack/localstack:4.9.2
+    environment:
+      SERVICES: sqs,sns,lambda,apigateway
+      # Las Lambdas se ejecutan en contenedores propios, en la misma red que el resto
+      LAMBDA_DOCKER_NETWORK: crediya_crediya-net
+      DEBUG: 0
+    # Solo en tu maquina: para llamar al endpoint de consulta de capacidad desde el host
+    ports:
+      - "127.0.0.1:${LOCALSTACK_PORT:-4566}:4566"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      # Los servicios figuran "available" hasta su primer uso: basta con que el endpoint de salud responda
+      test: ["CMD-SHELL", "curl -fs http://localhost:4566/_localstack/health >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [crediya-net]
+    restart: unless-stopped
+
+  lambda-notificaciones-jar:
+    # Compila la Lambda desde su repositorio y deja el jar en un volumen compartido; termina al copiarlo
+    build:
+      context: ${NOTIFICACIONES_REPO_PATH:-../../lambda-notificaciones}
+      target: artifact
+    image: crediya/lambda-notificaciones-jar:local
+    volumes:
+      - lambda-artifacts:/out
+    restart: "no"
+
+  lambda-capacidad-jar:
+    build:
+      context: ${CAPACIDAD_REPO_PATH:-../../lambda-capacidad-endeudamiento}
+      target: artifact
+    image: crediya/lambda-capacidad-jar:local
+    volumes:
+      - lambda-artifacts:/out
+    restart: "no"
+
+  aws-init:
+    image: amazon/aws-cli:2.27.50
+    entrypoint: ["/bin/sh", "/init.sh"]
+    environment:
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_REGION: us-east-1
+      LOCALSTACK_URL: http://localstack:4566
+    volumes:
+      - ./localstack/init.sh:/init.sh:ro
+      - lambda-artifacts:/artifacts:ro
+    depends_on:
+      localstack:
+        condition: service_healthy
+      lambda-notificaciones-jar:
+        condition: service_completed_successfully
+    networks: [crediya-net]
+    restart: "no"
+
+  solicitudes:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
+    image: crediya/solicitudes:local
+    environment:
+      DB_HOST: db-solicitudes
+      DB_PORT: 5432
+      DB_NAME: crediya_solicitudes
+      DB_USERNAME: ${SOLICITUDES_DB_USERNAME:?Define SOLICITUDES_DB_USERNAME (ver .env.example)}
+      DB_PASSWORD: ${SOLICITUDES_DB_PASSWORD:?Define SOLICITUDES_DB_PASSWORD (ver .env.example)}
+      # Comunicacion entre microservicios por el nombre del servicio de compose
+      AUTH_SERVICE_URL: http://autenticacion:8080
+      AUTH_JWKS_URI: http://autenticacion:8080/.well-known/jwks.json
+      # AWS (LocalStack en local). En AWS real se quitan el endpoint y las claves: la tarea usa su rol de IAM
+      AWS_REGION: us-east-1
+      AWS_ENDPOINT_URL: http://localstack:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      SQS_NOTIFICACIONES_URL: http://localstack:4566/000000000000/crediya-notificaciones
+      SQS_VALIDACION_URL: http://localstack:4566/000000000000/crediya-validacion-automatica
+      SQS_REPORTES_URL: http://localstack:4566/000000000000/crediya-solicitud-aprobada
+      SQS_DECISION_URL: http://localstack:4566/000000000000/crediya-decision-automatica
+    ports:
+      - "${SOLICITUDES_PORT:-8080}:8080"
+    depends_on:
+      db-solicitudes:
+        condition: service_healthy
+      autenticacion:
+        condition: service_healthy
+      aws-init:
+        condition: service_completed_successfully
+    networks: [crediya-net]
+    restart: unless-stopped
+    stop_grace_period: 30s
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 768m
+
+volumes:
+  lambda-artifacts:
+  db-autenticacion-data:
+  db-solicitudes-data:
+
+networks:
+  crediya-net:
