@@ -40,6 +40,10 @@ public final class ErrorCatalog {
     private ErrorCatalog() {
     }
 
+    public static boolean estaCatalogado(String codigoDominio) {
+        return ESTADOS_DOMINIO.containsKey(codigoDominio);
+    }
+
     public static HttpStatus estadoDe(String codigoDominio) {
         return ESTADOS_DOMINIO.getOrDefault(codigoDominio, HttpStatus.UNPROCESSABLE_ENTITY);
     }
