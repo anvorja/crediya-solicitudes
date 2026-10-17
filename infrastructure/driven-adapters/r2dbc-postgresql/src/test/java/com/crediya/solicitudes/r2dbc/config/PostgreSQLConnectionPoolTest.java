@@ -54,4 +54,12 @@ class PostgreSQLConnectionPoolTest {
     void rechazaUnModoDesconocido() {
         assertThrows(IllegalArgumentException.class, () -> PostgreSQLConnectionPool.modoSsl("cualquiera"));
     }
+
+    @Test
+    void soloLosModosVerifyCompruebanLaCa() {
+        assertEquals(true, PostgreSQLConnectionPool.verificaCertificado(SSLMode.VERIFY_FULL));
+        assertEquals(true, PostgreSQLConnectionPool.verificaCertificado(SSLMode.VERIFY_CA));
+        assertEquals(false, PostgreSQLConnectionPool.verificaCertificado(SSLMode.REQUIRE));
+        assertEquals(false, PostgreSQLConnectionPool.verificaCertificado(SSLMode.DISABLE));
+    }
 }
